@@ -1,128 +1,103 @@
-from os import getenv, remove, listdir, mkdir, rmdir
-from os.path import normpath, join, split, exists, isfile, commonpath
-from time import time_ns
+# -*-coding:utf-8;-*-
+from io import StringIO
+from json import dumps
+from os import getenv
+from os.path import abspath, dirname, exists, isfile, join
 from socket import socket, AF_INET, SOCK_STREAM
 from subprocess import run
-from json import dumps
-
-stringLoader = """var socket=new java.net.Socket("localhost",%d);
-var in_byte=socket.getInputStream();
-var in_char=new java.io.InputStreamReader(in_byte,"utf-8");
-var in_buf=new java.io.BufferedReader(in_char);
-var in_json=JSON.parse(in_buf.readLine());
-in_buf.close();
-in_char.close();
-in_byte.close();
-engines.execScript(in_json.title,in_json.script);
-socket.close();
-"""
-fileLoader = """var socket=new java.net.Socket("localhost",%d);
-var in_byte=socket.getInputStream();
-var in_char=new java.io.InputStreamReader(in_byte,"utf-8");
-var in_buf=new java.io.BufferedReader(in_char);
-var in_json=JSON.parse(in_buf.readLine());
-in_buf.close();
-in_char.close();
-in_byte.close();
-engines.execScriptFile(in_json.file,{path:in_json.directory});
-socket.close();
-"""
-basePath = normpath(getenv("EXTERNAL_STORAGE", "/sdcard"))
-tempPath = join(basePath, normpath("Android/data/com.termux/cache"))
+from tempfile import NamedTemporaryFile
+from typing import Tuple
 
 
-def getServer():
-    fSocket = socket(AF_INET, SOCK_STREAM)
-    fPort = 16384
+def createSocket() -> Tuple[socket, int]:
+    oServer = socket(AF_INET, SOCK_STREAM)
+    oPort = 16384
     while True:
+        oAddressTemp = ("localhost", oPort)
         try:
-            fSocket.bind(("localhost", fPort))
+            oServer.bind(oAddressTemp)
         except Exception:
-            fPort += 1
+            oPort += 1
         else:
             break
-    fSocket.listen(1)
-    return fSocket, fPort
+    oServer.listen(1)
+    return oServer, oPort
 
 
-def createTempDirs(iPath):
-    if iPath != basePath:
-        createTempDirs(split(iPath)[0])
-        if not exists(iPath):
-            mkdir(iPath)
-
-
-def createTempFile(isScript, iPort):
-    createTempDirs(tempPath)
-    fName = join(tempPath, ".%d.js.tmp" % (time_ns(),))
-    fd = open(fName, "w")
-    if isScript:
-        fd.write(stringLoader % (iPort,))
+def createTempFile(isString: bool, iPort: int) -> StringIO:
+    oPath = abspath(getenv("EXTERNAL_STORAGE", "/sdcard"))
+    try:
+        oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath)
+    except Exception:
+        raise PermissionError("Termux doesn't have the write permission of external storage.")
+    if isString:
+        oFile.write(open(join(dirname(__file__), "execute_string.js"), "r", encoding="utf-8").read() % (iPort,))
     else:
-        fd.write(fileLoader % (iPort,))
-    fd.close()
-    return fName
+        oFile.write(open(join(dirname(__file__), "execute_file.js"), "r", encoding="utf-8").read() % (iPort,))
+    oFile.flush()
+    return oFile
 
 
-def privateRunFile(iFile):
+def runTempFile(iFile: str) -> bool:
     return run(("am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "file://%s" % (iFile,), "-t",
-                "application/x-javascript", "--grant-read-uri-permission", "--grant-prefix-uri-permission",
-                "--include-stopped-packages", "--activity-no-animation",
-                "org.autojs.autojs/.external.open.RunIntentActivity")).returncode == 0
+                "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
+                "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
+                "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")).returncode == 0
 
 
-def sendString(isScript, iSocket, iScript, iTitle):
-    fSocket, addr = iSocket.accept()
-    if isScript:
-        fSocket.send((dumps({"title": iTitle, "script": iScript}) + "\n").encode("utf-8"))
+def sendScript(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPath: str):
+    oClient, oAddress = iServer.accept()
+    if isString:
+        oClient.send((dumps({"name": iTitleOrPath, "script": iStringOrFile}, ensure_ascii=False,
+                            separators=(",", ":")) + "\n").encode("utf-8"))
     else:
-        fSocket.send((dumps({"file": iScript, "directory": iTitle}) + "\n").encode("utf-8"))
-    fSocket.recv(1)
-    fSocket.close()
+        oClient.send((dumps({"file": iStringOrFile, "path": iTitleOrPath}, ensure_ascii=False,
+                            separators=(",", ":")) + "\n").encode("utf-8"))
+    oClient.close()
 
 
-def removeTempFile(iFile):
-    remove(iFile)
-    if len(listdir(tempPath)) == 0:
-        rmdir(tempPath)
+def runFile(iFile: str) -> bool:
+    if type(iFile) != str:
+        raise TypeError("The path of script must be a string.")
+    oFile = abspath(iFile)
+    if not (exists(oFile) and isfile(oFile)):
+        raise FileNotFoundError("The script must be an existing file.")
+    oServer, oPort = createSocket()
+    try:
+        oTempFile = createTempFile(False, oPort)
+    except PermissionError as oError:
+        oServer.close()
+        raise oError
+    if runTempFile(oTempFile.name):
+        sendScript(False, oServer, oFile, dirname(oFile))
+        oServer.close()
+        oTempFile.close()
+        return True
+    else:
+        oServer.close()
+        oTempFile.close()
+        return False
 
 
-def runString(iScript: str, iTitle: str):
-    if type(iScript) != str:
+def runString(iString: str, iTitle: str = "script") -> bool:
+    if type(iString) != str:
         raise TypeError("The script must be a string.")
     if type(iTitle) != str:
         raise TypeError("The name of script must be a string.")
     if iTitle == "":
         raise ValueError("The name of script shouldn't be void.")
-    fServer, fPort = getServer()
-    fTempFile = createTempFile(True, fPort)
-    if privateRunFile(fTempFile):
-        sendString(True, fServer, iScript, iTitle)
-        fServer.close()
-        removeTempFile(fTempFile)
+    oServer, oPort = createSocket()
+    try:
+        oTempFile = createTempFile(True, oPort)
+    except PermissionError as oError:
+        oServer.close()
+        raise oError
+    if runTempFile(oTempFile.name):
+        sendScript(True, oServer, iString, iTitle)
+        oServer.close()
+        oTempFile.close()
         return True
     else:
-        fServer.close()
-        removeTempFile(fTempFile)
-        return False
-
-
-def runFile(iFile: str):
-    if type(iFile) != str:
-        raise TypeError("The path of script must be a string.")
-    fFile = normpath(iFile)
-    if not (exists(fFile) and isfile(fFile)):
-        raise OSError("The script must be an existing file.")
-    if commonpath((fFile, basePath)) != basePath:
-        raise OSError("The script must be in external storage.")
-    fServer, fPort = getServer()
-    fTempFile = createTempFile(False, fPort)
-    if privateRunFile(fTempFile):
-        sendString(False, fServer, fFile, split(fFile)[0])
-        fServer.close()
-        removeTempFile(fTempFile)
-        return True
-    else:
-        fServer.close()
-        removeTempFile(fTempFile)
+        oServer.close()
+        oTempFile.close()
         return False
