@@ -1,21 +1,21 @@
 # -*-coding:utf-8;-*-
-from io import StringIO
 from json import dumps
 from os import getenv
 from os.path import abspath, dirname, exists, isfile, join
-from socket import socket, AF_INET, SOCK_STREAM
+from socket import AF_INET, SOCK_STREAM, socket
 from subprocess import run
 from tempfile import NamedTemporaryFile
-from typing import Tuple
+from typing import TextIO, Tuple
+from urllib.parse import quote
 
 
 def createSocket() -> Tuple[socket, int]:
     oServer = socket(AF_INET, SOCK_STREAM)
-    oPort = 16384
+    oPort = 49152
     while True:
-        oAddressTemp = ("localhost", oPort)
+        oPair = ("localhost", oPort)
         try:
-            oServer.bind(oAddressTemp)
+            oServer.bind(oPair)
         except Exception:
             oPort += 1
         else:
@@ -24,29 +24,32 @@ def createSocket() -> Tuple[socket, int]:
     return oServer, oPort
 
 
-def createTempFile(isString: bool, iPort: int) -> StringIO:
+def createTempFile(isString: bool, iPort: int) -> TextIO:
     oPath = abspath(getenv("EXTERNAL_STORAGE", "/sdcard"))
     try:
         oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath)
     except Exception:
-        raise PermissionError("Termux doesn't have the write permission of external storage.")
+        raise PermissionError("Termux doesn't have the write permission of the external storage.")
     if isString:
-        oFile.write(open(join(dirname(__file__), "execute_string.js"), "r", encoding="utf-8").read() % (iPort,))
+        oFile.write(open(join(dirname(__file__), "string_runner.js"), "r", encoding="utf-8").read() % (iPort,))
     else:
-        oFile.write(open(join(dirname(__file__), "execute_file.js"), "r", encoding="utf-8").read() % (iPort,))
+        oFile.write(open(join(dirname(__file__), "file_runner.js"), "r", encoding="utf-8").read() % (iPort,))
     oFile.flush()
     return oFile
 
 
-def runTempFile(iFile: str) -> bool:
-    return run(("am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "file://%s" % (iFile,), "-t",
-                "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
-                "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
-                "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")).returncode == 0
+def runTempFile(iPath: str) -> None:
+    oReturnCode = run(("am", "start", "-W", "-a", "VIEW", "-d", "file://%s" % (quote(iPath, encoding="utf-8"),), "-t",
+                       "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
+                       "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
+                       "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")).returncode
+    if oReturnCode != 0:
+        raise ChildProcessError(
+            "Unable to launch Auto.js or Autox.js application. The return code is %d." % (oReturnCode,))
 
 
-def sendScript(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPath: str):
-    oClient, oAddress = iServer.accept()
+def sendCommand(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPath: str) -> None:
+    oClient, oPair = iServer.accept()
     if isString:
         oClient.send((dumps({"name": iTitleOrPath, "script": iStringOrFile}, ensure_ascii=False,
                             separators=(",", ":")) + "\n").encode("utf-8"))
@@ -56,11 +59,11 @@ def sendScript(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPath
     oClient.close()
 
 
-def runFile(iFile: str) -> bool:
-    if type(iFile) != str:
+def runFile(iPath: str) -> None:
+    if type(iPath) != str:
         raise TypeError("The path of script must be a string.")
-    oFile = abspath(iFile)
-    if not (exists(oFile) and isfile(oFile)):
+    oPath = abspath(iPath)
+    if not (exists(oPath) and isfile(oPath)):
         raise FileNotFoundError("The script must be an existing file.")
     oServer, oPort = createSocket()
     try:
@@ -68,18 +71,18 @@ def runFile(iFile: str) -> bool:
     except PermissionError as oError:
         oServer.close()
         raise oError
-    if runTempFile(oTempFile.name):
-        sendScript(False, oServer, oFile, dirname(oFile))
+    try:
+        runTempFile(oTempFile.name)
+    except ChildProcessError as oError:
         oServer.close()
         oTempFile.close()
-        return True
-    else:
-        oServer.close()
-        oTempFile.close()
-        return False
+        raise oError
+    sendCommand(False, oServer, oPath, dirname(oPath))
+    oServer.close()
+    oTempFile.close()
 
 
-def runString(iString: str, iTitle: str = "script") -> bool:
+def runString(iString: str, iTitle: str = "Script") -> None:
     if type(iString) != str:
         raise TypeError("The script must be a string.")
     if type(iTitle) != str:
@@ -92,12 +95,12 @@ def runString(iString: str, iTitle: str = "script") -> bool:
     except PermissionError as oError:
         oServer.close()
         raise oError
-    if runTempFile(oTempFile.name):
-        sendScript(True, oServer, iString, iTitle)
+    try:
+        runTempFile(oTempFile.name)
+    except ChildProcessError as oError:
         oServer.close()
         oTempFile.close()
-        return True
-    else:
-        oServer.close()
-        oTempFile.close()
-        return False
+        raise oError
+    sendCommand(True, oServer, iString, iTitle)
+    oServer.close()
+    oTempFile.close()

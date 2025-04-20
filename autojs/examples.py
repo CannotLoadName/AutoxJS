@@ -1,10 +1,11 @@
 # -*-coding:utf-8;-*-
+from array import array
 from json import dumps, loads
 from os.path import dirname, join
 from socket import socket
 from threading import Lock, Thread
 from time import time_ns
-from typing import Callable, List, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 from warnings import warn
 from .core import createSocket, runString
 
@@ -39,32 +40,36 @@ def copyDict(iDict: dict) -> dict:
     return oDict
 
 
-def threadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: dict, callback: List[Callable],
-               endCallback: List[Callable], iClient: socket, args: dict):
+def threadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: dict, callback: List[Callable[[dict], None]],
+               endCallback: List[Callable[[], None]], iClient: socket, args: Dict[str, Any]) -> None:
     oFileDescriptor = iClient.makefile("r", encoding="utf-8")
     iClient.send((dumps(args, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
     while True:
-        oInputLine = oFileDescriptor.readline()
-        if oInputLine != "" and oInputLine[-1] == "\n":
-            oInputDict = loads(oInputLine)
-            lockRead.acquire()
-            for i in oInputDict:
-                result[i] = oInputDict[i]
-            lockRead.release()
-            lockCallback.acquire()
-            for i in callback:
-                oInputDictTemp = copyDict(oInputDict)
-                try:
-                    i(oInputDictTemp)
-                except Exception as oError:
-                    if len(oError.args) == 0:
-                        warn("A callback function raised a %s." % (type(oError).__name__,))
-                    else:
-                        warn("A callback function raised a %s with description \"%s\" ." % (
-                            type(oError).__name__, oError.args[0]))
-            lockCallback.release()
-        else:
+        try:
+            oInputLine = oFileDescriptor.readline()
+        except Exception:
             break
+        else:
+            if oInputLine != "" and oInputLine[-1] == "\n":
+                oInputDict = loads(oInputLine)
+                lockRead.acquire()
+                for i in oInputDict:
+                    result[i] = oInputDict[i]
+                lockRead.release()
+                lockCallback.acquire()
+                for i in callback:
+                    oInputDictTemp = copyDict(oInputDict)
+                    try:
+                        i(oInputDictTemp)
+                    except Exception as oError:
+                        if len(oError.args) == 0:
+                            warn("A callback function raised a %s." % (type(oError).__name__,))
+                        else:
+                            warn("A callback function raised a %s with the description \"%s\" ." % (
+                                type(oError).__name__, oError.args[0]))
+                lockCallback.release()
+            else:
+                break
     lockRead.acquire()
     result.clear()
     lockRead.release()
@@ -76,24 +81,80 @@ def threadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: dict, 
             if len(oError.args) == 0:
                 warn("A callback function raised a %s." % (type(oError).__name__,))
             else:
-                warn("A callback function raised a %s with description \"%s\" ." % (
+                warn("A callback function raised a %s with the description \"%s\" ." % (
                     type(oError).__name__, oError.args[0]))
     lockEnd.release()
     oFileDescriptor.close()
     iClient.close()
 
 
-class LocatorOrSensor:
+def recorderThreadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: Dict[str, Union[bytes, int]],
+                       callback: List[Callable[[array], None]], endCallback: List[Callable[[], None]], iClient: socket,
+                       args: Dict[str, Any]) -> None:
+    iClient.send((dumps(args, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+    oLastEndByte = b""
+    while True:
+        try:
+            oInputBytes = iClient.recv(65536)
+        except Exception:
+            break
+        else:
+            if oInputBytes == b"":
+                break
+            else:
+                oInputBytes = oLastEndByte + oInputBytes
+                if len(oInputBytes) % 2 == 0:
+                    oLastEndByte = b""
+                else:
+                    oLastEndByte = oInputBytes[-1]
+                    oInputBytes = oInputBytes[0:-1]
+                lockRead.acquire()
+                result["data"] = oInputBytes
+                if "serial_number" in result:
+                    result["serial_number"] += 1
+                else:
+                    result["serial_number"] = 0
+                lockRead.release()
+                lockCallback.acquire()
+                for i in callback:
+                    oInputBytesTemp = array("h", oInputBytes)
+                    try:
+                        i(oInputBytesTemp)
+                    except Exception as oError:
+                        if len(oError.args) == 0:
+                            warn("A callback function raised a %s." % (type(oError).__name__,))
+                        else:
+                            warn("A callback function raised a %s with the description \"%s\" ." % (
+                                type(oError).__name__, oError.args[0]))
+                lockCallback.release()
+    lockRead.acquire()
+    result.clear()
+    lockRead.release()
+    lockEnd.acquire()
+    for i in endCallback:
+        try:
+            i()
+        except Exception as oError:
+            if len(oError.args) == 0:
+                warn("A callback function raised a %s." % (type(oError).__name__,))
+            else:
+                warn("A callback function raised a %s with the description \"%s\" ." % (
+                    type(oError).__name__, oError.args[0]))
+    lockEnd.release()
+    iClient.close()
+
+
+class LocatorRecorderOrSensor:
     _lockMain: Union[Lock, None] = None
     _lockRead: Union[Lock, None] = None
     _lockCallback: Union[Lock, None] = None
     _lockEndCallback: Union[Lock, None] = None
     _result: Union[dict, None] = None
-    _callback: Union[List[Callable], None] = None
-    _endCallback: Union[List[Callable], None] = None
+    _callback: Union[List[Callable[[Union[dict, array]], None]], None] = None
+    _endCallback: Union[List[Callable[[], None]], None] = None
     _client: Union[socket, None] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lockMain = Lock()
         self._lockRead = Lock()
         self._lockCallback = Lock()
@@ -102,52 +163,43 @@ class LocatorOrSensor:
         self._callback = []
         self._endCallback = []
 
-    def __del__(self):
-        self._lockMain.acquire()
+    def __del__(self) -> None:
         if self._client is not None:
             oClientTemp = self._client
             try:
                 oClientTemp.send(b"{}\n")
             except Exception:
                 pass
-            self._client = None
-        self._lockMain.release()
 
-    def callback(self, iCallback: Callable):
+    def callback(self, iCallback: Callable[[Union[dict, array]], None]) -> None:
         if not callable(iCallback):
             raise TypeError("The callback function must be a callable object.")
         self._lockCallback.acquire()
         self._callback.append(iCallback)
         self._lockCallback.release()
 
-    def clearCallbacks(self):
+    def clearCallbacks(self) -> None:
         self._lockCallback.acquire()
         self._callback.clear()
         self._lockCallback.release()
 
-    def endCallback(self, iCallback: Callable):
+    def endCallback(self, iCallback: Callable[[], None]) -> None:
         if not callable(iCallback):
             raise TypeError("The callback function must be a callable object.")
         self._lockEndCallback.acquire()
         self._endCallback.append(iCallback)
         self._lockEndCallback.release()
 
-    def clearEndCallbacks(self):
+    def clearEndCallbacks(self) -> None:
         self._lockEndCallback.acquire()
         self._endCallback.clear()
         self._lockEndCallback.release()
 
-    def read(self) -> dict:
-        self._lockRead.acquire()
-        oResult = copyDict(self._result)
-        self._lockRead.release()
-        return oResult
-
-    def stop(self):
+    def stop(self) -> None:
         self._lockMain.acquire()
         if self._client is None:
             self._lockMain.release()
-            raise AttributeError("The locator or sensor has already been stopped.")
+            raise AttributeError("The locator, recorder or sensor has already been stopped.")
         oClientTemp = self._client
         try:
             oClientTemp.send(b"{}\n")
@@ -157,75 +209,109 @@ class LocatorOrSensor:
         self._lockMain.release()
 
 
-class Location(LocatorOrSensor):
-    def start(self, iProvider: str, iDelay: int = 1000):
+class Location(LocatorRecorderOrSensor):
+    def start(self, iProvider: str, iDelay: int = 1000) -> None:
         if type(iProvider) != str:
             raise TypeError("The location provider must be a string.")
         if type(iDelay) != int:
             raise TypeError("The delay of locator must be an integer.")
         if iProvider not in LOCATION_PROVIDERS:
             raise ValueError("Unsupported location provider.")
-        if iDelay < 1 or iDelay > 2147483:
-            raise ValueError("The delay of locator must be between 1 and 2147483 milliseconds.")
+        if iDelay < 0 or iDelay > 2147483647:
+            raise ValueError("The delay of locator must be between 0 and 2147483647 milliseconds.")
         self._lockMain.acquire()
         if self._client is not None:
             self._lockMain.release()
             raise AttributeError("The locator has already been started.")
         oServer, oPort = createSocket()
-        oScriptString = open(join(dirname(__file__), "call_locator.js"), "r", encoding="utf-8").read() % (oPort,)
-        oScriptTitle = "LocationManager%d" % (time_ns(),)
+        oScriptString = open(join(dirname(__file__), "locator_caller.js"), "r", encoding="utf-8").read() % (oPort,)
+        oScriptTitle = "LocationManager-%d" % (time_ns(),)
         try:
-            isRunSuccess = runString(oScriptString, oScriptTitle)
-        except PermissionError as oError:
+            runString(oScriptString, oScriptTitle)
+        except (PermissionError, ChildProcessError) as oError:
             self._lockMain.release()
             oServer.close()
             raise oError
-        if isRunSuccess:
-            self._client, oAddress = oServer.accept()
-            Thread(target=threadMain, args=(
-                self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback,
-                self._endCallback,
-                self._client, {"provider": iProvider, "delay": iDelay})).start()
+        self._client, oPair = oServer.accept()
+        Thread(target=threadMain, args=(
+            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
+            self._client, {"provider": iProvider, "delay": iDelay, "distance": 0})).start()
+        self._lockMain.release()
+        oServer.close()
+
+    def read(self) -> dict:
+        self._lockRead.acquire()
+        oResult = copyDict(self._result)
+        self._lockRead.release()
+        return oResult
+
+
+class Recorder(LocatorRecorderOrSensor):
+    def start(self) -> None:
+        self._lockMain.acquire()
+        if self._client is not None:
+            self._lockMain.release()
+            raise AttributeError("The recorder has already been started.")
+        oServer, oPort = createSocket()
+        oScriptString = open(join(dirname(__file__), "recorder_caller.js"), "r", encoding="utf-8").read() % (oPort,)
+        oScriptTitle = "AudioRecorder-%d" % (time_ns(),)
+        try:
+            runString(oScriptString, oScriptTitle)
+        except (PermissionError, ChildProcessError) as oError:
             self._lockMain.release()
             oServer.close()
+            raise oError
+        self._client, oPair = oServer.accept()
+        Thread(target=recorderThreadMain, args=(
+            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
+            self._client, {"samplerate": 44100, "channel": "mono", "format": "16bit"})).start()
+        self._lockMain.release()
+        oServer.close()
+
+    def read(self) -> Tuple[int, Union[array, None]]:
+        self._lockRead.acquire()
+        if len(self._result) == 0:
+            self._lockRead.release()
+            return -1, None
         else:
-            self._lockMain.release()
-            oServer.close()
-            raise ChildProcessError("Unable to launch Auto.js or Autox.js application.")
+            oSerialNumber = self._result["serial_number"]
+            oData = array("h", self._result["data"])
+            self._lockRead.release()
+            return oSerialNumber, oData
 
 
-class Sensor(LocatorOrSensor):
-    def start(self, iType: str, iDelay: int = 200):
+class Sensor(LocatorRecorderOrSensor):
+    def start(self, iType: str, iDelay: int = 3) -> None:
         if type(iType) != str:
             raise TypeError("The type of sensor must be a string.")
         if type(iDelay) != int:
             raise TypeError("The delay of sensor must be an integer.")
         if iType not in SENSOR_TYPES:
             raise ValueError("Unsupported type of sensor.")
-        if iDelay < 1 or iDelay > 2147483:
-            raise ValueError("The delay of sensor must be between 1 and 2147483 milliseconds.")
+        if iDelay < 0 or iDelay > 2147483647:
+            raise ValueError("The delay of sensor must be between 0 and 2147483647 microseconds.")
         self._lockMain.acquire()
         if self._client is not None:
             self._lockMain.release()
             raise AttributeError("The sensor has already been started.")
         oServer, oPort = createSocket()
-        oScriptString = open(join(dirname(__file__), "call_sensors.js"), "r", encoding="utf-8").read() % (oPort,)
-        oScriptTitle = "SensorManager%d" % (time_ns(),)
+        oScriptString = open(join(dirname(__file__), "sensor_caller.js"), "r", encoding="utf-8").read() % (oPort,)
+        oScriptTitle = "SensorManager-%d" % (time_ns(),)
         try:
-            isRunSuccess = runString(oScriptString, oScriptTitle)
-        except PermissionError as oError:
+            runString(oScriptString, oScriptTitle)
+        except (PermissionError, ChildProcessError) as oError:
             self._lockMain.release()
             oServer.close()
             raise oError
-        if isRunSuccess:
-            self._client, oAddress = oServer.accept()
-            Thread(target=threadMain, args=(
-                self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback,
-                self._endCallback,
-                self._client, {"type": iType, "delay": iDelay})).start()
-            self._lockMain.release()
-            oServer.close()
-        else:
-            self._lockMain.release()
-            oServer.close()
-            raise ChildProcessError("Unable to launch Auto.js or Autox.js application.")
+        self._client, oPair = oServer.accept()
+        Thread(target=threadMain, args=(
+            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
+            self._client, {"type": iType, "delay": iDelay})).start()
+        self._lockMain.release()
+        oServer.close()
+
+    def read(self) -> dict:
+        self._lockRead.acquire()
+        oResult = copyDict(self._result)
+        self._lockRead.release()
+        return oResult
