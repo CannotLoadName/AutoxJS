@@ -1,11 +1,11 @@
 var client=new java.net.Socket("localhost",%d);
 var inputBuffer=new java.io.BufferedReader(new java.io.InputStreamReader(client.getInputStream(),"utf-8"));
-var outputBuffer=new java.io.PrintWriter(client.getOutputStream());
 var inputObject=JSON.parse(inputBuffer.readLine());
+var outputBuffer=new java.io.PrintWriter(client.getOutputStream());
+var sensorManager=context.getSystemService(context.SENSOR_SERVICE);
 var stopEvent=events.emitter(threads.currentThread());
-var sensorManager=context.getSystemService(android.content.Context.SENSOR_SERVICE);
-var sensorListener=new android.hardware.SensorEventListener(){
-    onSensorChanged(event){
+var sensorListener=new android.hardware.SensorEventListener({
+    onSensorChanged:function(event){
         var outputString=JSON.stringify({
             accuracy:event.accuracy,
             time:event.timestamp,
@@ -19,7 +19,7 @@ var sensorListener=new android.hardware.SensorEventListener(){
             stopEvent.emit("stop");
         }
     }
-};
+});
 switch(inputObject.type){
     case "accelerometer":
     var sensorType=android.hardware.Sensor.TYPE_ACCELEROMETER;
@@ -51,7 +51,6 @@ switch(inputObject.type){
     default:
     var sensorType=android.hardware.Sensor.TYPE_STEP_COUNTER;
 }
-sensorManager.registerListener(sensorListener,sensorManager.getDefaultSensor(sensorType),inputObject.delay,new android.os.Handler(android.os.Looper.myLooper()));
 stopEvent.on("stop",function(){
     sensorManager.unregisterListener(sensorListener);
     outputBuffer.close();
@@ -59,11 +58,11 @@ stopEvent.on("stop",function(){
     client.close();
     stopEvent.removeAllListeners("stop");
 });
+sensorManager.registerListener(sensorListener,sensorManager.getDefaultSensor(sensorType),inputObject.delay,new android.os.Handler(android.os.Looper.myLooper()));
 threads.start(function(){
     try{
         inputBuffer.readLine();
     }
-    catch(error){}
     finally{
         stopEvent.emit("stop");
     }

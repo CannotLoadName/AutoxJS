@@ -1,17 +1,17 @@
 var client=new java.net.Socket("localhost",%d);
 var inputBuffer=new java.io.BufferedReader(new java.io.InputStreamReader(client.getInputStream(),"utf-8"));
-var outputBuffer=new java.io.PrintWriter(client.getOutputStream());
 var inputObject=JSON.parse(inputBuffer.readLine());
-var stopEvent=events.emitter(threads.currentThread());
-var locationManager=context.getSystemService(android.content.Context.LOCATION_SERVICE);
+var outputBuffer=new java.io.PrintWriter(client.getOutputStream());
+var locationManager=context.getSystemService(context.LOCATION_SERVICE);
 if(inputObject.provider=="gps"){
     var locationProvider=locationManager.GPS_PROVIDER;
 }
 else{
     var locationProvider=locationManager.NETWORK_PROVIDER;
 }
-var locationListener=new android.location.LocationListener(){
-    onLocationChanged(location){
+var stopEvent=events.emitter(threads.currentThread());
+var locationListener=new android.location.LocationListener({
+    onLocationChanged:function(location){
         var outputString=JSON.stringify({
             accuracy:location.getAccuracy(),
             altitude:location.getAltitude(),
@@ -33,8 +33,7 @@ var locationListener=new android.location.LocationListener(){
             stopEvent.emit("stop");
         }
     }
-};
-locationManager.requestLocationUpdates(locationProvider,inputObject.delay,inputObject.distance,locationListener,android.os.Looper.myLooper());
+});
 stopEvent.on("stop",function(){
     locationManager.removeUpdates(locationListener);
     outputBuffer.close();
@@ -42,11 +41,11 @@ stopEvent.on("stop",function(){
     client.close();
     stopEvent.removeAllListeners("stop");
 });
+locationManager.requestLocationUpdates(locationProvider,inputObject.delay,inputObject.distance,locationListener,android.os.Looper.myLooper());
 threads.start(function(){
     try{
         inputBuffer.readLine();
     }
-    catch(error){}
     finally{
         stopEvent.emit("stop");
     }

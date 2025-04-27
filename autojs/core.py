@@ -17,7 +17,11 @@ def createSocket() -> Tuple[socket, int]:
         try:
             oServer.bind(oPair)
         except Exception:
-            oPort += 1
+            if oPort < 65535:
+                oPort += 1
+            else:
+                oServer.close()
+                raise OverflowError("No available ports found.")
         else:
             break
     oServer.listen(1)
@@ -27,35 +31,48 @@ def createSocket() -> Tuple[socket, int]:
 def createTempFile(isString: bool, iPort: int) -> TextIO:
     oPath = abspath(getenv("EXTERNAL_STORAGE", "/sdcard"))
     try:
-        oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath)
+        oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath, errors="ignore")
     except Exception:
         raise PermissionError("Termux doesn't have the write permission of the external storage.")
     if isString:
-        oFile.write(open(join(dirname(__file__), "string_runner.js"), "r", encoding="utf-8").read() % (iPort,))
+        oFile.write(
+            open(join(dirname(__file__), "string_runner.js"), "r", encoding="utf-8", errors="ignore").read() % (iPort,))
     else:
-        oFile.write(open(join(dirname(__file__), "file_runner.js"), "r", encoding="utf-8").read() % (iPort,))
+        oFile.write(
+            open(join(dirname(__file__), "file_runner.js"), "r", encoding="utf-8", errors="ignore").read() % (iPort,))
     oFile.flush()
     return oFile
 
 
 def runTempFile(iPath: str) -> None:
-    oReturnCode = run(("am", "start", "-W", "-a", "VIEW", "-d", "file://%s" % (quote(iPath, encoding="utf-8"),), "-t",
-                       "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
-                       "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
-                       "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")).returncode
-    if oReturnCode != 0:
+    oCommand = (
+        "am", "start", "-W", "-a", "VIEW", "-d", "file://%s" % (quote(iPath, encoding="utf-8", errors="ignore"),), "-t",
+        "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
+        "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
+        "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")
+    try:
+        oReturn = run(oCommand)
+    except Exception as oError:
         raise ChildProcessError(
-            "Unable to launch Auto.js or Autox.js application. The return code is %d." % (oReturnCode,))
+            "Unable to launch Auto.js or Autox.js application. The reason is a %s." % (type(oError).__name__,))
+    if oReturn.returncode != 0:
+        raise ChildProcessError(
+            "Unable to launch Auto.js or Autox.js application. The return code is %d." % (oReturn.returncode,))
 
 
 def sendCommand(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPath: str) -> None:
     oClient, oPair = iServer.accept()
     if isString:
-        oClient.send((dumps({"name": iTitleOrPath, "script": iStringOrFile}, ensure_ascii=False,
-                            separators=(",", ":")) + "\n").encode("utf-8"))
+        oBytes = (dumps({"name": iTitleOrPath, "script": iStringOrFile}, ensure_ascii=False,
+                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
     else:
-        oClient.send((dumps({"file": iStringOrFile, "path": iTitleOrPath}, ensure_ascii=False,
-                            separators=(",", ":")) + "\n").encode("utf-8"))
+        oBytes = (dumps({"file": iStringOrFile, "path": iTitleOrPath}, ensure_ascii=False,
+                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
+    try:
+        oClient.sendall(oBytes)
+    except Exception:
+        oClient.close()
+        raise BrokenPipeError("Failed while sending command to the client program.")
     oClient.close()
 
 
@@ -77,7 +94,12 @@ def runFile(iPath: str) -> None:
         oServer.close()
         oTempFile.close()
         raise oError
-    sendCommand(False, oServer, oPath, dirname(oPath))
+    try:
+        sendCommand(False, oServer, oPath, dirname(oPath))
+    except BrokenPipeError as oError:
+        oServer.close()
+        oTempFile.close()
+        raise oError
     oServer.close()
     oTempFile.close()
 
@@ -101,6 +123,11 @@ def runString(iString: str, iTitle: str = "Script") -> None:
         oServer.close()
         oTempFile.close()
         raise oError
-    sendCommand(True, oServer, iString, iTitle)
+    try:
+        sendCommand(True, oServer, iString, iTitle)
+    except BrokenPipeError as oError:
+        oServer.close()
+        oTempFile.close()
+        raise oError
     oServer.close()
     oTempFile.close()

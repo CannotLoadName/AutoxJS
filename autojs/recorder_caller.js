@@ -1,8 +1,7 @@
 var client=new java.net.Socket("localhost",%d);
 var inputBuffer=new java.io.BufferedReader(new java.io.InputStreamReader(client.getInputStream(),"utf-8"));
-var outputBuffer=client.getOutputStream();
 var inputObject=JSON.parse(inputBuffer.readLine());
-var stopEvent=events.emitter(threads.currentThread());
+var outputBuffer=client.getOutputStream();
 if(inputObject.channel=="mono"){
     var audioChannel=android.media.AudioFormat.CHANNEL_IN_MONO;
 }
@@ -17,10 +16,11 @@ else{
 }
 var bufferSize=android.media.AudioRecord.getMinBufferSize(inputObject.samplerate,audioChannel,audioFormat);
 var audioRecorder=new android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC,inputObject.samplerate,audioChannel,audioFormat,bufferSize);
+var stopEvent=events.emitter(threads.currentThread());
 var outputBytes=java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE,bufferSize);
-var recorderListener=new android.media.AudioRecord.OnRecordPositionUpdateListener(){
-    onPeriodicNotification(recorder){
-        var outputLength=recorder.read(outputBytes,0,bufferSize,android.media.AudioRecord.READ_NON_BLOCKING);
+var recorderListener=new android.media.AudioRecord.OnRecordPositionUpdateListener({
+    onPeriodicNotification:function(recorder){
+        var outputLength=recorder.read(outputBytes,0,bufferSize,recorder.READ_NON_BLOCKING);
         if(outputLength>0){
             try{
                 outputBuffer.write(outputBytes,0,outputLength);
@@ -31,10 +31,9 @@ var recorderListener=new android.media.AudioRecord.OnRecordPositionUpdateListene
             }
         }
     }
-};
+});
 audioRecorder.setPositionNotificationPeriod(Math.floor(audioRecorder.getBufferSizeInFrames()/2));
 audioRecorder.setRecordPositionUpdateListener(recorderListener,new android.os.Handler(android.os.Looper.myLooper()));
-audioRecorder.startRecording();
 stopEvent.on("stop",function(){
     audioRecorder.stop();
     audioRecorder.release();
@@ -43,11 +42,11 @@ stopEvent.on("stop",function(){
     client.close();
     stopEvent.removeAllListeners("stop");
 });
+audioRecorder.startRecording();
 threads.start(function(){
     try{
         inputBuffer.readLine();
     }
-    catch(error){}
     finally{
         stopEvent.emit("stop");
     }
