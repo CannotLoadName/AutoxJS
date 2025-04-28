@@ -42,7 +42,7 @@ def copyDict(iDict: dict) -> dict:
 
 def threadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: dict, callback: List[Callable[[dict], None]],
                endCallback: List[Callable[[], None]], iClient: socket) -> None:
-    oFileDescriptor = iClient.makefile("r", encoding="utf-8", errors="ignore")
+    oFileDescriptor = iClient.makefile("r", encoding="utf-8", errors="replace")
     while True:
         try:
             oInputLine = oFileDescriptor.readline()
@@ -236,7 +236,7 @@ class Location(LocatorRecorderOrSensor):
             self._lockMain.release()
             raise oError
         oScriptString = open(join(dirname(__file__), "locator_caller.js"), "r", encoding="utf-8",
-                             errors="ignore").read() % (oPort,)
+                             errors="replace").read() % (oPort,)
         oScriptTitle = "LocationManager-%d" % (time_ns(),)
         try:
             runString(oScriptString, oScriptTitle)
@@ -246,7 +246,7 @@ class Location(LocatorRecorderOrSensor):
             raise oError
         oClient, oPair = oServer.accept()
         oBytes = (dumps({"provider": iProvider, "delay": iDelay, "distance": 0}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
+                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
         try:
             oClient.sendall(oBytes)
         except Exception:
@@ -284,7 +284,7 @@ class Recorder(LocatorRecorderOrSensor):
             self._lockMain.release()
             raise oError
         oScriptString = open(join(dirname(__file__), "recorder_caller.js"), "r", encoding="utf-8",
-                             errors="ignore").read() % (oPort,)
+                             errors="replace").read() % (oPort,)
         oScriptTitle = "AudioRecorder-%d" % (time_ns(),)
         try:
             runString(oScriptString, oScriptTitle)
@@ -294,7 +294,7 @@ class Recorder(LocatorRecorderOrSensor):
             raise oError
         oClient, oPair = oServer.accept()
         oBytes = (dumps({"samplerate": 44100, "channel": "mono", "format": "16bit"}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
+                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
         try:
             oClient.sendall(oBytes)
         except Exception:
@@ -341,7 +341,7 @@ class Sensor(LocatorRecorderOrSensor):
             self._lockMain.release()
             raise oError
         oScriptString = open(join(dirname(__file__), "sensor_caller.js"), "r", encoding="utf-8",
-                             errors="ignore").read() % (oPort,)
+                             errors="replace").read() % (oPort,)
         oScriptTitle = "SensorManager-%d" % (time_ns(),)
         try:
             runString(oScriptString, oScriptTitle)
@@ -351,7 +351,7 @@ class Sensor(LocatorRecorderOrSensor):
             raise oError
         oClient, oPair = oServer.accept()
         oBytes = (dumps({"type": iType, "delay": iDelay}, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
-            "utf-8", "ignore")
+            "utf-8", "replace")
         try:
             oClient.sendall(oBytes)
         except Exception:

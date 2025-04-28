@@ -31,22 +31,24 @@ def createSocket() -> Tuple[socket, int]:
 def createTempFile(isString: bool, iPort: int) -> TextIO:
     oPath = abspath(getenv("EXTERNAL_STORAGE", "/sdcard"))
     try:
-        oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath, errors="ignore")
+        oFile = NamedTemporaryFile("w", encoding="utf-8", suffix=".js", dir=oPath, errors="replace")
     except Exception:
         raise PermissionError("Termux doesn't have the write permission of the external storage.")
     if isString:
         oFile.write(
-            open(join(dirname(__file__), "string_runner.js"), "r", encoding="utf-8", errors="ignore").read() % (iPort,))
+            open(join(dirname(__file__), "string_runner.js"), "r", encoding="utf-8", errors="replace").read() % (
+                iPort,))
     else:
         oFile.write(
-            open(join(dirname(__file__), "file_runner.js"), "r", encoding="utf-8", errors="ignore").read() % (iPort,))
+            open(join(dirname(__file__), "file_runner.js"), "r", encoding="utf-8", errors="replace").read() % (iPort,))
     oFile.flush()
     return oFile
 
 
 def runTempFile(iPath: str) -> None:
     oCommand = (
-        "am", "start", "-W", "-a", "VIEW", "-d", "file://%s" % (quote(iPath, encoding="utf-8", errors="ignore"),), "-t",
+        "am", "start", "-W", "-a", "VIEW", "-d", "file://%s" % (quote(iPath, encoding="utf-8", errors="replace"),),
+        "-t",
         "application/x-javascript", "--grant-read-uri-permission", "--grant-write-uri-permission",
         "--grant-prefix-uri-permission", "--include-stopped-packages", "--activity-exclude-from-recents",
         "--activity-no-animation", "org.autojs.autojs/.external.open.RunIntentActivity")
@@ -64,10 +66,10 @@ def sendCommand(isString: bool, iServer: socket, iStringOrFile: str, iTitleOrPat
     oClient, oPair = iServer.accept()
     if isString:
         oBytes = (dumps({"name": iTitleOrPath, "script": iStringOrFile}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
+                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
     else:
         oBytes = (dumps({"file": iStringOrFile, "path": iTitleOrPath}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "ignore")
+                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
     try:
         oClient.sendall(oBytes)
     except Exception:

@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="AutoxJS",
-    version="1.0.8",
+    version="1.0.9",
     description="Launch Auto.js and Autox.js scripts with Python in Termux.",
     author="Enbuging",
     author_email="electricfan@yeah.net",
