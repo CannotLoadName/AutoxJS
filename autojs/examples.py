@@ -1,373 +1,208 @@
-# -*-coding:utf-8;-*-
-from array import array
-from json import dumps, loads
-from os.path import dirname, join
-from socket import socket
-from threading import Lock, Thread
+#-*-coding:utf-8;-*-
+from array import ArrayType,array
+from copy import deepcopy
+from json import dumps,loads
+from os.path import dirname,join
+from socket import AF_INET,SOCK_STREAM,SocketType,socket
+from threading import Lock,Thread
 from time import time_ns
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Any,Callable,Dict,List,Optional,Tuple,Union
 from warnings import warn
-from .core import createSocket, runString
-
-LOCATION_PROVIDERS = ("gps", "network")
-SENSOR_TYPES = (
-    "accelerometer", "gravity", "gyroscope", "light", "linear_acceleration", "magnetic_field", "orientation",
-    "proximity",
-    "rotation_vector", "step_counter")
-
-
-def copyList(iList: list) -> list:
-    oList = []
-    for i in iList:
-        if type(i) == list:
-            oList.append(copyList(i))
-        elif type(i) == dict:
-            oList.append(copyDict(i))
-        else:
-            oList.append(i)
-    return oList
-
-
-def copyDict(iDict: dict) -> dict:
-    oDict = {}
-    for i in iDict:
-        if type(iDict[i]) == dict:
-            oDict[i] = copyDict(iDict[i])
-        elif type(iDict[i]) == list:
-            oDict[i] = copyList(iDict[i])
-        else:
-            oDict[i] = iDict[i]
-    return oDict
-
-
-def threadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: dict, callback: List[Callable[[dict], None]],
-               endCallback: List[Callable[[], None]], iClient: socket) -> None:
-    oFileDescriptor = iClient.makefile("r", encoding="utf-8", errors="replace")
-    while True:
-        try:
-            oInputLine = oFileDescriptor.readline()
-        except Exception:
-            break
-        else:
-            if oInputLine != "" and oInputLine[-1] == "\n":
+from .runner import CONFIG,bindAvailablePort,runString
+MODULE_PATH=dirname(__spec__.origin)
+LOCATOR_SCRIPT=open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8").read()
+RECORDER_SCRIPT=open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8").read()
+SENSOR_SCRIPT=open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8").read()
+def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Any],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
+    with tempSocket as clientSocket:
+        clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+        with clientSocket.makefile("r",encoding="utf-8") as socketReader:
+            while True:
                 try:
-                    oInputDict = loads(oInputLine)
-                except Exception:
+                    inputLine=socketReader.readline()
+                except OSError:
                     break
                 else:
-                    lockRead.acquire()
-                    for i in oInputDict:
-                        result[i] = oInputDict[i]
-                    lockRead.release()
-                    lockCallback.acquire()
-                    for i in callback:
-                        oInputDictTemp = copyDict(oInputDict)
-                        try:
-                            i(oInputDictTemp)
-                        except Exception as oError:
-                            if len(oError.args) == 0:
-                                warn("A callback function raised a %s." % (type(oError).__name__,))
-                            else:
-                                warn("A callback function raised a %s with the description \"%s\" ." % (
-                                    type(oError).__name__, oError.args[0]))
-                    lockCallback.release()
-            else:
-                break
-    lockRead.acquire()
-    result.clear()
-    lockRead.release()
-    lockEnd.acquire()
-    for i in endCallback:
-        try:
-            i()
-        except Exception as oError:
-            if len(oError.args) == 0:
-                warn("A callback function raised a %s." % (type(oError).__name__,))
-            else:
-                warn("A callback function raised a %s with the description \"%s\" ." % (
-                    type(oError).__name__, oError.args[0]))
-    lockEnd.release()
-    oFileDescriptor.close()
-    iClient.close()
-
-
-def recorderThreadMain(lockRead: Lock, lockCallback: Lock, lockEnd: Lock, result: Dict[str, Union[bytes, int]],
-                       callback: List[Callable[[array], None]], endCallback: List[Callable[[], None]],
-                       iClient: socket) -> None:
-    oLastEndByte = b""
-    while True:
-        try:
-            oInputBytes = iClient.recv(65536)
-        except Exception:
-            break
-        else:
-            if oInputBytes == b"":
-                break
-            else:
-                oInputBytes = oLastEndByte + oInputBytes
-                if len(oInputBytes) % 2 == 0:
-                    oLastEndByte = b""
-                else:
-                    oLastEndByte = oInputBytes[-1]
-                    oInputBytes = oInputBytes[0:-1]
-                lockRead.acquire()
-                result["data"] = oInputBytes
-                if "serial_number" in result:
-                    result["serial_number"] += 1
-                else:
-                    result["serial_number"] = 0
-                lockRead.release()
-                lockCallback.acquire()
-                for i in callback:
-                    oInputBytesTemp = array("h", oInputBytes)
-                    try:
-                        i(oInputBytesTemp)
-                    except Exception as oError:
-                        if len(oError.args) == 0:
-                            warn("A callback function raised a %s." % (type(oError).__name__,))
-                        else:
-                            warn("A callback function raised a %s with the description \"%s\" ." % (
-                                type(oError).__name__, oError.args[0]))
-                lockCallback.release()
-    lockRead.acquire()
-    result.clear()
-    lockRead.release()
-    lockEnd.acquire()
-    for i in endCallback:
-        try:
-            i()
-        except Exception as oError:
-            if len(oError.args) == 0:
-                warn("A callback function raised a %s." % (type(oError).__name__,))
-            else:
-                warn("A callback function raised a %s with the description \"%s\" ." % (
-                    type(oError).__name__, oError.args[0]))
-    lockEnd.release()
-    iClient.close()
-
-
-class LocatorRecorderOrSensor:
-    _lockMain: Lock
-    _lockRead: Lock
-    _lockCallback: Lock
-    _lockEndCallback: Lock
-    _result: dict
-    _callback: List[Callable[[Union[dict, array]], None]]
-    _endCallback: List[Callable[[], None]]
-    _client: Union[socket, None]
-
-    def __init__(self) -> None:
-        self._lockMain = Lock()
-        self._lockRead = Lock()
-        self._lockCallback = Lock()
-        self._lockEndCallback = Lock()
-        self._result = {}
-        self._callback = []
-        self._endCallback = []
-        self._client = None
-
-    def __del__(self) -> None:
-        if self._client is not None:
-            oClientTemp = self._client
+                    if inputLine.endswith("\n"):
+                        inputDict=loads(inputLine)
+                        with readLock:
+                            for i,j in inputDict.items():
+                                result[i]=j
+                        with callbackLock:
+                            for i in callback:
+                                tempDict=deepcopy(inputDict)
+                                try:
+                                    i(tempDict)
+                                except Exception as error:
+                                    warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                    else:
+                        break
+    with readLock:
+        result.clear()
+    with endCallbackLock:
+        for i in endCallback:
             try:
-                oClientTemp.send(b"{}\n")
-            except Exception:
+                i()
+            except Exception as error:
+                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[int,str]])->None:
+    with tempSocket as clientSocket:
+        clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+        lastEnd=b""
+        while True:
+            try:
+                inputBytes=clientSocket.recv(receiveSize)
+            except OSError:
+                break
+            else:
+                if inputBytes:
+                    inputBytes=lastEnd+inputBytes
+                    inputLength=len(inputBytes)//itemSize*itemSize
+                    lastEnd=inputBytes[inputLength:]
+                    inputBytes=inputBytes[:inputLength]
+                    with readLock:
+                        result["data"]=inputBytes
+                        if "serial_number" in result:
+                            result["serial_number"]+=1
+                        else:
+                            result["serial_number"]=0
+                    with callbackLock:
+                        for i in callback:
+                            inputArray=array(typeCode,inputBytes)
+                            try:
+                                i(inputArray)
+                            except Exception as error:
+                                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                else:
+                    break
+    with readLock:
+        result.clear()
+    with endCallbackLock:
+        for i in endCallback:
+            try:
+                i()
+            except Exception as error:
+                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+class LocatorRecorderOrSensor:
+    _mainLock:Lock
+    _readLock:Lock
+    _callbackLock:Lock
+    _endCallbackLock:Lock
+    _result:Dict[str,Any]
+    _callback:List[Callable[[Union[ArrayType,Dict[str,Any]]],None]]
+    _endCallback:List[Callable[[],None]]
+    _clientSocket:Optional[SocketType]
+    def __init__(self)->None:
+        self._mainLock=Lock()
+        self._readLock=Lock()
+        self._callbackLock=Lock()
+        self._endCallbackLock=Lock()
+        self._result={}
+        self._callback=[]
+        self._endCallback=[]
+        self._clientSocket=None
+    def __del__(self)->None:
+        tempSocket=self._clientSocket
+        if tempSocket is not None:
+            try:
+                tempSocket.sendall(b"{}\n")
+            except OSError:
                 pass
-
-    def callback(self, iCallback: Callable[[Union[dict, array]], None]) -> None:
-        if not callable(iCallback):
-            raise TypeError("The callback function must be a callable object.")
-        self._lockCallback.acquire()
-        self._callback.append(iCallback)
-        self._lockCallback.release()
-
-    def clearCallbacks(self) -> None:
-        self._lockCallback.acquire()
-        self._callback.clear()
-        self._lockCallback.release()
-
-    def endCallback(self, iCallback: Callable[[], None]) -> None:
-        if not callable(iCallback):
-            raise TypeError("The callback function must be a callable object.")
-        self._lockEndCallback.acquire()
-        self._endCallback.append(iCallback)
-        self._lockEndCallback.release()
-
-    def clearEndCallbacks(self) -> None:
-        self._lockEndCallback.acquire()
-        self._endCallback.clear()
-        self._lockEndCallback.release()
-
-    def stop(self) -> None:
-        self._lockMain.acquire()
-        if self._client is None:
-            self._lockMain.release()
-            raise AttributeError("The locator, recorder or sensor has already been stopped.")
-        oClientTemp = self._client
-        try:
-            oClientTemp.send(b"{}\n")
-        except Exception:
-            pass
-        self._client = None
-        self._lockMain.release()
-
-
+    def addCallback(self,callback:Callable[[Union[ArrayType,Dict[str,Any]]],None])->Callable[[Union[ArrayType,Dict[str,Any]]],None]:
+        with self._callbackLock:
+            self._callback.append(callback)
+        return callback
+    def clearCallbacks(self)->None:
+        with self._callbackLock:
+            self._callback.clear()
+    def addEndCallback(self,endCallback:Callable[[],None])->Callable[[],None]:
+        with self._endCallbackLock:
+            self._endCallback.append(endCallback)
+        return endCallback
+    def clearEndCallbacks(self)->None:
+        with self._endCallbackLock:
+            self._endCallback.clear()
+    def stop(self)->None:
+        with self._mainLock:
+            tempSocket=self._clientSocket
+            if tempSocket is None:
+                raise AttributeError("The locator, recorder or sensor hasn't been started yet")
+            try:
+                tempSocket.sendall(b"{}\n")
+            except OSError:
+                pass
+            self._clientSocket=None
 class Location(LocatorRecorderOrSensor):
     @staticmethod
-    def requestPermission() -> None:
-        runString("runtime.requestPermissions([\"access_fine_location\"]);", "LocatingPermission-%d" % (time_ns(),))
-
-    def start(self, iProvider: str, iDelay: int = 1000) -> None:
-        if type(iProvider) != str:
-            raise TypeError("The location provider must be a string.")
-        if type(iDelay) != int:
-            raise TypeError("The delay of locator must be an integer.")
-        if iProvider not in LOCATION_PROVIDERS:
-            raise ValueError("Unsupported location provider.")
-        if iDelay < 0 or iDelay > 2147483647:
-            raise ValueError("The delay of locator must be between 0 and 2147483647 milliseconds.")
-        self._lockMain.acquire()
-        if self._client is not None:
-            self._lockMain.release()
-            raise AttributeError("The locator has already been started.")
-        try:
-            oServer, oPort = createSocket()
-        except OverflowError as oError:
-            self._lockMain.release()
-            raise oError
-        oScriptString = open(join(dirname(__file__), "locator_caller.js"), "r", encoding="utf-8",
-                             errors="replace").read() % (oPort,)
-        oScriptTitle = "LocationManager-%d" % (time_ns(),)
-        try:
-            runString(oScriptString, oScriptTitle)
-        except (OverflowError, PermissionError, ChildProcessError, BrokenPipeError) as oError:
-            self._lockMain.release()
-            oServer.close()
-            raise oError
-        oClient, oPair = oServer.accept()
-        oBytes = (dumps({"provider": iProvider, "delay": iDelay, "distance": 0}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
-        try:
-            oClient.sendall(oBytes)
-        except Exception:
-            self._lockMain.release()
-            oClient.close()
-            oServer.close()
-            raise BrokenPipeError("Failed while sending arguments to the client program.")
-        Thread(target=threadMain, args=(
-            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
-            oClient)).start()
-        self._client = oClient
-        self._lockMain.release()
-        oServer.close()
-
-    def read(self) -> dict:
-        self._lockRead.acquire()
-        oResult = copyDict(self._result)
-        self._lockRead.release()
-        return oResult
-
-
+    def requestPermission()->None:
+        runString("runtime.requestPermissions([\"access_fine_location\"]);","%s-%d"%(CONFIG["location_permission_title"],time_ns()))
+    def start(self,locationProvider:str=CONFIG["default_location_provider"],updateDelay:int=CONFIG["default_locating_delay"])->None:
+        usedProvider=str(locationProvider)
+        for i in usedProvider:
+            if i not in CONFIG["location_provider_characters"]:
+                raise ValueError("Invalid location provider name")
+        usedDelay=int(updateDelay)
+        if usedDelay<0 or usedDelay>CONFIG["max_locating_delay"]:
+            raise ValueError("The delay out of range")
+        with self._mainLock:
+            if self._clientSocket is not None:
+                raise AttributeError("The locator has already been started")
+            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+                serverPort=bindAvailablePort(serverSocket,1)
+                runString(LOCATOR_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["locator_title"],time_ns()))
+                clientSocket=serverSocket.accept()[0]
+            Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"distance":CONFIG["min_locating_distance"],"provider":usedProvider})).start()
+            self._clientSocket=clientSocket
+    def read(self)->Dict[str,Any]:
+        with self._readLock:
+            result=deepcopy(self._result)
+        return result
 class Recorder(LocatorRecorderOrSensor):
     @staticmethod
-    def requestPermission() -> None:
-        runString("runtime.requestPermissions([\"record_audio\"]);", "RecordingPermission-%d" % (time_ns(),))
-
-    def start(self) -> None:
-        self._lockMain.acquire()
-        if self._client is not None:
-            self._lockMain.release()
-            raise AttributeError("The recorder has already been started.")
-        try:
-            oServer, oPort = createSocket()
-        except OverflowError as oError:
-            self._lockMain.release()
-            raise oError
-        oScriptString = open(join(dirname(__file__), "recorder_caller.js"), "r", encoding="utf-8",
-                             errors="replace").read() % (oPort,)
-        oScriptTitle = "AudioRecorder-%d" % (time_ns(),)
-        try:
-            runString(oScriptString, oScriptTitle)
-        except (OverflowError, PermissionError, ChildProcessError, BrokenPipeError) as oError:
-            self._lockMain.release()
-            oServer.close()
-            raise oError
-        oClient, oPair = oServer.accept()
-        oBytes = (dumps({"samplerate": 44100, "channel": "mono", "format": "16bit"}, ensure_ascii=False,
-                        separators=(",", ":")) + "\n").encode("utf-8", "replace")
-        try:
-            oClient.sendall(oBytes)
-        except Exception:
-            self._lockMain.release()
-            oClient.close()
-            oServer.close()
-            raise BrokenPipeError("Failed while sending arguments to the client program.")
-        Thread(target=recorderThreadMain, args=(
-            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
-            oClient)).start()
-        self._client = oClient
-        self._lockMain.release()
-        oServer.close()
-
-    def read(self) -> Tuple[int, Union[array, None]]:
-        self._lockRead.acquire()
-        if len(self._result) == 0:
-            self._lockRead.release()
-            return -1, None
-        else:
-            oSerialNumber = self._result["serial_number"]
-            oData = array("h", self._result["data"])
-            self._lockRead.release()
-            return oSerialNumber, oData
-
-
+    def requestPermission()->None:
+        runString("runtime.requestPermissions([\"record_audio\"]);","%s-%d"%(CONFIG["record_permission_title"],time_ns()))
+    def start(self,audioSource:str=CONFIG["default_record_source"])->None:
+        usedSource=str(audioSource)
+        for i in usedSource:
+            if i not in CONFIG["record_source_characters"]:
+                raise ValueError("Invalid audio source name")
+        with self._mainLock:
+            if self._clientSocket is not None:
+                raise AttributeError("The recorder has already been started")
+            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+                serverPort=bindAvailablePort(serverSocket,1)
+                runString(RECORDER_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["recorder_title"],time_ns()))
+                clientSocket=serverSocket.accept()[0]
+            Thread(target=recorderMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,CONFIG["max_receive_size"],array(CONFIG["audio_array_type"]).itemsize,CONFIG["audio_array_type"],{"channel":CONFIG["record_channel"],"format":CONFIG["record_format"],"samplerate":CONFIG["record_sample_rate"],"source":usedSource})).start()
+            self._clientSocket=clientSocket
+    def read(self)->Tuple[int,ArrayType]:
+        with self._readLock:
+            if self._result:
+                serialNumber=self._result["serial_number"]
+                result=array(CONFIG["audio_array_type"],self._result["data"])
+            else:
+                serialNumber=-1
+                result=array(CONFIG["audio_array_type"])
+        return serialNumber,result
 class Sensor(LocatorRecorderOrSensor):
-    def start(self, iType: str, iDelay: int = 3) -> None:
-        if type(iType) != str:
-            raise TypeError("The type of sensor must be a string.")
-        if type(iDelay) != int:
-            raise TypeError("The delay of sensor must be an integer.")
-        if iType not in SENSOR_TYPES:
-            raise ValueError("Unsupported type of sensor.")
-        if iDelay < 0 or iDelay > 2147483647:
-            raise ValueError("The delay of sensor must be between 0 and 2147483647 microseconds.")
-        self._lockMain.acquire()
-        if self._client is not None:
-            self._lockMain.release()
-            raise AttributeError("The sensor has already been started.")
-        try:
-            oServer, oPort = createSocket()
-        except OverflowError as oError:
-            self._lockMain.release()
-            raise oError
-        oScriptString = open(join(dirname(__file__), "sensor_caller.js"), "r", encoding="utf-8",
-                             errors="replace").read() % (oPort,)
-        oScriptTitle = "SensorManager-%d" % (time_ns(),)
-        try:
-            runString(oScriptString, oScriptTitle)
-        except (OverflowError, PermissionError, ChildProcessError, BrokenPipeError) as oError:
-            self._lockMain.release()
-            oServer.close()
-            raise oError
-        oClient, oPair = oServer.accept()
-        oBytes = (dumps({"type": iType, "delay": iDelay}, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
-            "utf-8", "replace")
-        try:
-            oClient.sendall(oBytes)
-        except Exception:
-            self._lockMain.release()
-            oClient.close()
-            oServer.close()
-            raise BrokenPipeError("Failed while sending arguments to the client program.")
-        Thread(target=threadMain, args=(
-            self._lockRead, self._lockCallback, self._lockEndCallback, self._result, self._callback, self._endCallback,
-            oClient)).start()
-        self._client = oClient
-        self._lockMain.release()
-        oServer.close()
-
-    def read(self) -> dict:
-        self._lockRead.acquire()
-        oResult = copyDict(self._result)
-        self._lockRead.release()
-        return oResult
+    def start(self,sensorType:str,sensorDelay:int=CONFIG["default_sensor_delay"])->None:
+        usedType=str(sensorType)
+        for i in usedType:
+            if i not in CONFIG["sensor_type_characters"]:
+                raise ValueError("Invalid sensor type name")
+        usedDelay=int(sensorDelay)
+        if usedDelay<0 or usedDelay>CONFIG["max_sensor_delay"]:
+            raise ValueError("The delay out of range")
+        with self._mainLock:
+            if self._clientSocket is not None:
+                raise AttributeError("The sensor has already been started")
+            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+                serverPort=bindAvailablePort(serverSocket,1)
+                runString(SENSOR_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["sensor_title"],time_ns()))
+                clientSocket=serverSocket.accept()[0]
+            Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"latency":CONFIG["max_sensor_latency"],"type":usedType})).start()
+            self._clientSocket=clientSocket
+    def read(self)->Dict[str,Any]:
+        with self._readLock:
+            result=deepcopy(self._result)
+        return result

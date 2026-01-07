@@ -1,2 +1,2 @@
 # Overview
-Launch Auto.js and Autox.js scripts with Python in Termux.<br/>
+Launch Auto.js and AutoX.js scripts through Python in Termux.<br/>
