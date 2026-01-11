@@ -13,7 +13,7 @@ MODULE_PATH=dirname(__spec__.origin)
 LOCATOR_SCRIPT=open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8").read()
 RECORDER_SCRIPT=open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8").read()
 SENSOR_SCRIPT=open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8").read()
-def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Any],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
+def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[Dict[str,Any],int]],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
     with tempSocket as clientSocket:
         clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
         with clientSocket.makefile("r",encoding="utf-8") as socketReader:
@@ -26,8 +26,11 @@ def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,re
                     if inputLine.endswith("\n"):
                         inputDict=loads(inputLine)
                         with readLock:
-                            for i,j in inputDict.items():
-                                result[i]=j
+                            result["data"]=inputDict
+                            if "serial_number" in result:
+                                result["serial_number"]+=1
+                            else:
+                                result["serial_number"]=0
                         with callbackLock:
                             for i in callback:
                                 tempDict=deepcopy(inputDict)
@@ -48,33 +51,34 @@ def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,re
 def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[int,str]])->None:
     with tempSocket as clientSocket:
         clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
-        lastEnd=b""
-        while True:
-            try:
-                inputBytes=clientSocket.recv(receiveSize)
-            except OSError:
-                break
-            else:
-                if inputBytes:
-                    inputBytes=lastEnd+inputBytes
-                    inputLength=len(inputBytes)//itemSize*itemSize
-                    lastEnd=inputBytes[inputLength:]
-                    inputBytes=inputBytes[:inputLength]
-                    with readLock:
-                        result["data"]=inputBytes
-                        if "serial_number" in result:
-                            result["serial_number"]+=1
-                        else:
-                            result["serial_number"]=0
-                    with callbackLock:
-                        for i in callback:
-                            inputArray=array(typeCode,inputBytes)
-                            try:
-                                i(inputArray)
-                            except Exception as error:
-                                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
-                else:
+        lastLength=0
+        with memoryview(bytearray(receiveSize+itemSize-1)) as inputBuffer:
+            while True:
+                try:
+                    inputLength=clientSocket.recv_into(inputBuffer[lastLength:receiveSize+lastLength],receiveSize)
+                except OSError:
                     break
+                else:
+                    if inputLength>0:
+                        totalLength=inputLength+lastLength
+                        lastLength=totalLength%itemSize
+                        inputBytes=inputBuffer[:totalLength-lastLength].tobytes()
+                        with readLock:
+                            result["data"]=inputBytes
+                            if "serial_number" in result:
+                                result["serial_number"]+=1
+                            else:
+                                result["serial_number"]=0
+                        with callbackLock:
+                            for i in callback:
+                                inputArray=array(typeCode,inputBytes)
+                                try:
+                                    i(inputArray)
+                                except Exception as error:
+                                    warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                        inputBuffer[:lastLength]=inputBuffer[totalLength-lastLength:totalLength]
+                    else:
+                        break
     with readLock:
         result.clear()
     with endCallbackLock:
@@ -88,7 +92,7 @@ class LocatorRecorderOrSensor:
     _readLock:Lock
     _callbackLock:Lock
     _endCallbackLock:Lock
-    _result:Dict[str,Any]
+    _result:Dict[str,Union[Dict[str,Any],bytes,int]]
     _callback:List[Callable[[Union[ArrayType,Dict[str,Any]]],None]]
     _endCallback:List[Callable[[],None]]
     _clientSocket:Optional[SocketType]
@@ -153,10 +157,17 @@ class Location(LocatorRecorderOrSensor):
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"distance":CONFIG["min_locating_distance"],"provider":usedProvider})).start()
             self._clientSocket=clientSocket
-    def read(self)->Dict[str,Any]:
+    def read(self)->Tuple[int,Dict[str,Any]]:
         with self._readLock:
-            result=deepcopy(self._result)
-        return result
+            if "serial_number" in self._result:
+                serialNumber=self._result["serial_number"]
+            else:
+                serialNumber=-1
+            if "data" in self._result:
+                result=deepcopy(self._result["data"])
+            else:
+                result={}
+        return serialNumber,result
 class Recorder(LocatorRecorderOrSensor):
     @staticmethod
     def requestPermission()->None:
@@ -177,11 +188,13 @@ class Recorder(LocatorRecorderOrSensor):
             self._clientSocket=clientSocket
     def read(self)->Tuple[int,ArrayType]:
         with self._readLock:
-            if self._result:
+            if "serial_number" in self._result:
                 serialNumber=self._result["serial_number"]
-                result=array(CONFIG["audio_array_type"],self._result["data"])
             else:
                 serialNumber=-1
+            if "data" in self._result:
+                result=array(CONFIG["audio_array_type"],self._result["data"])
+            else:
                 result=array(CONFIG["audio_array_type"])
         return serialNumber,result
 class Sensor(LocatorRecorderOrSensor):
@@ -202,7 +215,14 @@ class Sensor(LocatorRecorderOrSensor):
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"latency":CONFIG["max_sensor_latency"],"type":usedType})).start()
             self._clientSocket=clientSocket
-    def read(self)->Dict[str,Any]:
+    def read(self)->Tuple[int,Dict[str,Any]]:
         with self._readLock:
-            result=deepcopy(self._result)
-        return result
+            if "serial_number" in self._result:
+                serialNumber=self._result["serial_number"]
+            else:
+                serialNumber=-1
+            if "data" in self._result:
+                result=deepcopy(self._result["data"])
+            else:
+                result={}
+        return serialNumber,result

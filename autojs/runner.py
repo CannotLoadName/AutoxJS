@@ -10,6 +10,7 @@ from typing import Any,Optional
 from urllib.parse import quote,urlunsplit
 MODULE_PATH=dirname(__spec__.origin)
 CONFIG=load(open(join(MODULE_PATH,"config.json"),"r",encoding="utf-8"))
+AUTO_RUNNER=open(join(MODULE_PATH,"autorunner.js"),"r",encoding="utf-8").read()
 FILE_RUNNER=open(join(MODULE_PATH,"filerunner.js"),"r",encoding="utf-8").read()
 STRING_RUNNER=open(join(MODULE_PATH,"stringrunner.js"),"r",encoding="utf-8").read()
 def bindAvailablePort(unboundSocket:SocketType,listenBacklog:Optional[int]=None,connectAddress:Any=None)->int:
@@ -31,6 +32,20 @@ def bindAvailablePort(unboundSocket:SocketType,listenBacklog:Optional[int]=None,
     else:
         unboundSocket.connect(connectAddress)
     return port
+def runAutoFile(filePath:str)->None:
+    absolutePath=abspath(str(filePath))
+    if not exists(absolutePath):
+        raise FileNotFoundError(ENOENT,"The file doesn't exist",filePath)
+    if not isfile(absolutePath):
+        raise IsADirectoryError(EISDIR,"The path belongs to a directory",filePath)
+    with socket(AF_INET,SOCK_STREAM) as serverSocket:
+        serverPort=bindAvailablePort(serverSocket,1)
+        with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
+            tempFile.write(AUTO_RUNNER%(serverPort,))
+            tempFile.flush()
+            run((CONFIG["am_command"],"start","-W","-a",CONFIG["intent_action"],"-d",urlunsplit(("file","",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
+            with serverSocket.accept()[0] as clientSocket:
+                clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
 def runFile(filePath:str)->None:
     absolutePath=abspath(str(filePath))
     if not exists(absolutePath):
