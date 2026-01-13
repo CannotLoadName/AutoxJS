@@ -1,5 +1,7 @@
 {
   "am_command": "am",
+  "am_subcommand": "start",
+  "am_user": "current",
   "audio_array_type": "h",
   "command_title": "Command",
   "default_locating_delay": 1000,
@@ -29,5 +31,6 @@
   "sensor_title": "SensorManager",
   "sensor_type_characters": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_",
   "temporary_file_suffix": ".js",
-  "temporary_path": "$EXTERNAL_STORAGE"
+  "temporary_path": "$EXTERNAL_STORAGE",
+  "url_scheme": "file"
 }

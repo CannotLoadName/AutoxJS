@@ -2,7 +2,7 @@
 from setuptools import setup
 setup(
     name="AutoxJS",
-    version="1.0.11",
+    version="1.0.12",
     description="Launch Auto.js and AutoX.js scripts through Python in Termux.",
     long_description="Run \"pip install AutoxJS\" to install this package.<br/>Then run \"python3 -m autojs -h\" to learn how to use this package.<br/>For new versions of AutoX.js, running \"python3 -m autojs -c intent_component org.autojs.autoxjs/.external.open.RunIntentActivity\" to change the package name may be necessary.",
     long_description_content_type="text/markdown",
