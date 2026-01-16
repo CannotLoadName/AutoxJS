@@ -43,7 +43,7 @@ def runAutoFile(filePath:str)->None:
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
             tempFile.write(AUTO_RUNNER%(serverPort,))
             tempFile.flush()
-            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"-W","--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
+            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
                 clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
 def runFile(filePath:str)->None:
@@ -57,7 +57,7 @@ def runFile(filePath:str)->None:
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
             tempFile.write(FILE_RUNNER%(serverPort,))
             tempFile.flush()
-            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"-W","--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
+            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
                 clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
 def runString(commandString:str,commandTitle:Optional[str]=None)->None:
@@ -66,7 +66,7 @@ def runString(commandString:str,commandTitle:Optional[str]=None)->None:
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
             tempFile.write(STRING_RUNNER%(serverPort,))
             tempFile.flush()
-            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"-W","--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
+            run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
                 if commandTitle is None:
                     usedTitle="%s-%d"%(CONFIG["command_title"],time_ns())

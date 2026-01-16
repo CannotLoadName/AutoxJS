@@ -14,6 +14,7 @@ LOCATOR_SCRIPT=open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8").read()
 RECORDER_SCRIPT=open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8").read()
 SENSOR_SCRIPT=open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8").read()
 def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[Dict[str,Any],int]],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
+    tempCallback=[]
     with tempSocket as clientSocket:
         clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
         with clientSocket.makefile("r",encoding="utf-8") as socketReader:
@@ -32,23 +33,27 @@ def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,re
                             else:
                                 result["serial_number"]=0
                         with callbackLock:
-                            for i in callback:
-                                tempDict=deepcopy(inputDict)
-                                try:
-                                    i(tempDict)
-                                except Exception as error:
-                                    warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                            tempCallback.extend(callback)
+                        for i in tempCallback:
+                            tempDict=deepcopy(inputDict)
+                            try:
+                                i(tempDict)
+                            except Exception as error:
+                                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                        tempCallback.clear()
                     else:
                         break
     with readLock:
         result.clear()
     with endCallbackLock:
-        for i in endCallback:
-            try:
-                i()
-            except Exception as error:
-                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+        tempCallback.extend(endCallback)
+    for i in tempCallback:
+        try:
+            i()
+        except Exception as error:
+            warn("An end callback function raised a %s: %s"%(type(error).__name__,str(error)))
 def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[int,str]])->None:
+    tempCallback=[]
     with tempSocket as clientSocket:
         clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
         lastLength=0
@@ -70,23 +75,26 @@ def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dic
                             else:
                                 result["serial_number"]=0
                         with callbackLock:
-                            for i in callback:
-                                inputArray=array(typeCode,inputBytes)
-                                try:
-                                    i(inputArray)
-                                except Exception as error:
-                                    warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                            tempCallback.extend(callback)
+                        for i in tempCallback:
+                            inputArray=array(typeCode,inputBytes)
+                            try:
+                                i(inputArray)
+                            except Exception as error:
+                                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                        tempCallback.clear()
                         inputBuffer[:lastLength]=inputBuffer[totalLength-lastLength:totalLength]
                     else:
                         break
     with readLock:
         result.clear()
     with endCallbackLock:
-        for i in endCallback:
-            try:
-                i()
-            except Exception as error:
-                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+        tempCallback.extend(endCallback)
+    for i in tempCallback:
+        try:
+            i()
+        except Exception as error:
+            warn("An end callback function raised a %s: %s"%(type(error).__name__,str(error)))
 class LocatorRecorderOrSensor:
     _mainLock:Lock
     _readLock:Lock
