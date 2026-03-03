@@ -1,4 +1,4 @@
-var clientSocket=new java.net.Socket("localhost",%d);
+var clientSocket=new java.net.Socket("%s",%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var locationManager=context.getSystemService(context.LOCATION_SERVICE);
@@ -34,7 +34,7 @@ stopEmitter.on("stop",function(){
     clientSocket.close();
     stopEmitter.removeAllListeners("stop");
 });
-locationManager.requestLocationUpdates(eval("locationManager."+inputObject.getString("provider")+"_PROVIDER"),inputObject.getLong("delay"),inputObject.getDouble("distance"),locationListener,android.os.Looper.myLooper());
+locationManager.requestLocationUpdates(new Function("return android.location.LocationManager."+inputObject.getString("provider")+"_PROVIDER;")(),inputObject.getLong("delay"),inputObject.getDouble("distance"),locationListener,android.os.Looper.myLooper());
 threads.start(function(){
     try{
         inputReader.readLine();

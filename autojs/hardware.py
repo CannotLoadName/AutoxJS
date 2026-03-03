@@ -52,38 +52,41 @@ def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,re
             i()
         except Exception as error:
             warn("An end callback function raised a %s: %s"%(type(error).__name__,str(error)))
-def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[int,str]])->None:
+def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[float,int,str]])->None:
     tempCallback=[]
     with tempSocket as clientSocket:
         clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
         lastLength=0
         with memoryview(bytearray(receiveSize+itemSize-1)) as inputBuffer:
             while True:
+                tempBuffer=inputBuffer[lastLength:receiveSize+lastLength]
                 try:
-                    inputLength=clientSocket.recv_into(inputBuffer[lastLength:receiveSize+lastLength],receiveSize)
+                    inputLength=clientSocket.recv_into(tempBuffer,receiveSize)
                 except OSError:
                     break
                 else:
                     if inputLength>0:
                         totalLength=inputLength+lastLength
                         lastLength=totalLength%itemSize
-                        inputBytes=inputBuffer[:totalLength-lastLength].tobytes()
-                        with readLock:
-                            result["data"]=inputBytes
-                            if "serial_number" in result:
-                                result["serial_number"]+=1
-                            else:
-                                result["serial_number"]=0
-                        with callbackLock:
-                            tempCallback.extend(callback)
-                        for i in tempCallback:
-                            inputArray=array(typeCode,inputBytes)
-                            try:
-                                i(inputArray)
-                            except Exception as error:
-                                warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
-                        tempCallback.clear()
-                        inputBuffer[:lastLength]=inputBuffer[totalLength-lastLength:totalLength]
+                        usedLength=totalLength-lastLength
+                        if usedLength>0:
+                            inputBytes=inputBuffer[:usedLength].tobytes()
+                            with readLock:
+                                result["data"]=inputBytes
+                                if "serial_number" in result:
+                                    result["serial_number"]+=1
+                                else:
+                                    result["serial_number"]=0
+                            with callbackLock:
+                                tempCallback.extend(callback)
+                            for i in tempCallback:
+                                inputArray=array(typeCode,inputBytes)
+                                try:
+                                    i(inputArray)
+                                except Exception as error:
+                                    warn("A callback function raised a %s: %s"%(type(error).__name__,str(error)))
+                            tempCallback.clear()
+                            inputBuffer[:lastLength]=inputBuffer[usedLength:totalLength]
                     else:
                         break
     with readLock:
@@ -161,7 +164,7 @@ class Location(LocatorRecorderOrSensor):
                 raise AttributeError("The locator has already been started")
             with socket(AF_INET,SOCK_STREAM) as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(LOCATOR_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["locator_title"],time_ns()))
+                runString(LOCATOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["locator_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"distance":CONFIG["min_locating_distance"],"provider":usedProvider})).start()
             self._clientSocket=clientSocket
@@ -190,9 +193,9 @@ class Recorder(LocatorRecorderOrSensor):
                 raise AttributeError("The recorder has already been started")
             with socket(AF_INET,SOCK_STREAM) as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(RECORDER_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["recorder_title"],time_ns()))
+                runString(RECORDER_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["recorder_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
-            Thread(target=recorderMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,CONFIG["max_receive_size"],array(CONFIG["audio_array_type"]).itemsize,CONFIG["audio_array_type"],{"channel":CONFIG["record_channel"],"format":CONFIG["record_format"],"samplerate":CONFIG["record_sample_rate"],"source":usedSource})).start()
+            Thread(target=recorderMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,CONFIG["max_receive_size"],array(CONFIG["audio_array_type"]).itemsize,CONFIG["audio_array_type"],{"bufferratio":CONFIG["record_buffer_ratio"],"channel":CONFIG["record_channel"],"format":CONFIG["record_format"],"samplerate":CONFIG["record_sample_rate"],"source":usedSource})).start()
             self._clientSocket=clientSocket
     def read(self)->Tuple[int,ArrayType]:
         with self._readLock:
@@ -219,7 +222,7 @@ class Sensor(LocatorRecorderOrSensor):
                 raise AttributeError("The sensor has already been started")
             with socket(AF_INET,SOCK_STREAM) as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(SENSOR_SCRIPT%(serverPort,),"%s-%d"%(CONFIG["sensor_title"],time_ns()))
+                runString(SENSOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["sensor_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"latency":CONFIG["max_sensor_latency"],"type":usedType})).start()
             self._clientSocket=clientSocket

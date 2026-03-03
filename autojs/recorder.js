@@ -1,12 +1,12 @@
-var clientSocket=new java.net.Socket("localhost",%d);
+var clientSocket=new java.net.Socket("%s",%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var sampleRate=inputObject.getInt("samplerate");
-var audioChannel=eval("android.media.AudioFormat.CHANNEL_"+inputObject.getString("channel"));
-var audioFormat=eval("android.media.AudioFormat.ENCODING_"+inputObject.getString("format"));
+var audioChannel=new Function("return android.media.AudioFormat.CHANNEL_"+inputObject.getString("channel")+";")();
+var audioFormat=new Function("return android.media.AudioFormat.ENCODING_"+inputObject.getString("format")+";")();
 var bufferSize=android.media.AudioRecord.getMinBufferSize(sampleRate,audioChannel,audioFormat);
-var audioRecorder=new android.media.AudioRecord(eval("android.media.MediaRecorder.AudioSource."+inputObject.getString("source")),sampleRate,audioChannel,audioFormat,bufferSize);
-audioRecorder.setPositionNotificationPeriod(Math.floor(0.5*audioRecorder.getBufferSizeInFrames()));
+var audioRecorder=new android.media.AudioRecord(new Function("return android.media.MediaRecorder.AudioSource."+inputObject.getString("source")+";")(),sampleRate,audioChannel,audioFormat,bufferSize);
+audioRecorder.setPositionNotificationPeriod(Math.floor(inputObject.getDouble("bufferratio")*audioRecorder.getBufferSizeInFrames()));
 var outputBytes=java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE,bufferSize);
 var outputStream=clientSocket.getOutputStream();
 var stopEmitter=events.emitter(threads.currentThread());

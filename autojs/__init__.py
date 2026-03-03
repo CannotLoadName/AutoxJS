@@ -1,3 +1,4 @@
 #-*-coding:utf-8;-*-
 from .runner import bindAvailablePort,runAutoFile,runFile,runString
-from .examples import Location,Recorder,Sensor
+from .hardware import Location,Recorder,Sensor
+from .remotecaller import Context

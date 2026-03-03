@@ -41,7 +41,7 @@ def runAutoFile(filePath:str)->None:
     with socket(AF_INET,SOCK_STREAM) as serverSocket:
         serverPort=bindAvailablePort(serverSocket,1)
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
-            tempFile.write(AUTO_RUNNER%(serverPort,))
+            tempFile.write(AUTO_RUNNER%(CONFIG["script_host_name"],serverPort))
             tempFile.flush()
             run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
@@ -55,7 +55,7 @@ def runFile(filePath:str)->None:
     with socket(AF_INET,SOCK_STREAM) as serverSocket:
         serverPort=bindAvailablePort(serverSocket,1)
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
-            tempFile.write(FILE_RUNNER%(serverPort,))
+            tempFile.write(FILE_RUNNER%(CONFIG["script_host_name"],serverPort))
             tempFile.flush()
             run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
@@ -64,7 +64,7 @@ def runString(commandString:str,commandTitle:Optional[str]=None)->None:
     with socket(AF_INET,SOCK_STREAM) as serverSocket:
         serverPort=bindAvailablePort(serverSocket,1)
         with NamedTemporaryFile("w",encoding="utf-8",suffix=CONFIG["temporary_file_suffix"],dir=abspath(expandvars(CONFIG["temporary_path"]))) as tempFile:
-            tempFile.write(STRING_RUNNER%(serverPort,))
+            tempFile.write(STRING_RUNNER%(CONFIG["script_host_name"],serverPort))
             tempFile.flush()
             run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
