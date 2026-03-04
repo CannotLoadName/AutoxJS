@@ -3,7 +3,7 @@ var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientS
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var locationManager=context.getSystemService(context.LOCATION_SERVICE);
 var outputObject=new org.json.JSONObject();
-var outputWriter=new java.io.PrintWriter(clientSocket.getOutputStream(),true);
+var outputWriter=new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.OutputStreamWriter(clientSocket.getOutputStream(),"utf-8")),true);
 var stopEmitter=events.emitter(threads.currentThread());
 var locationListener=new android.location.LocationListener({
     onLocationChanged:function(location){

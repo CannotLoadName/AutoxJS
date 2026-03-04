@@ -3,7 +3,7 @@ var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientS
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var sensorManager=context.getSystemService(context.SENSOR_SERVICE);
 var outputObject=new org.json.JSONObject();
-var outputWriter=new java.io.PrintWriter(clientSocket.getOutputStream(),true);
+var outputWriter=new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.OutputStreamWriter(clientSocket.getOutputStream(),"utf-8")),true);
 var stopEmitter=events.emitter(threads.currentThread());
 var sensorListener=new android.hardware.SensorEventListener({
     onSensorChanged:function(event){

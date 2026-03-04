@@ -79,8 +79,5 @@ class Context:
             tempSocket.sendall(b"{}\n")
         except OSError:
             pass
-        try:
-            tempSocket.close()
-        except OSError:
-            pass
+        tempSocket.close()
         self._clientSocket=None

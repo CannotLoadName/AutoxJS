@@ -1,7 +1,7 @@
 var clientSocket=new java.net.Socket("%s",%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
-var namespace=[];
-var outputWriter=new java.io.PrintWriter(clientSocket.getOutputStream(),true);
+var namespace={};
+var outputWriter=new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.OutputStreamWriter(clientSocket.getOutputStream(),"utf-8")),true);
 var inputLine,inputObject,key,target,value,success,result,outputObject,outputLine;
 while(true){
     try{
