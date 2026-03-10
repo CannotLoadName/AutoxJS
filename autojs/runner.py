@@ -45,7 +45,7 @@ def runAutoFile(filePath:str)->None:
             tempFile.flush()
             run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
-                clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+                clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n").encode("utf-8"))
 def runFile(filePath:str)->None:
     absolutePath=abspath(str(filePath))
     if not exists(absolutePath):
@@ -59,7 +59,7 @@ def runFile(filePath:str)->None:
             tempFile.flush()
             run((expandvars(CONFIG["am_command"]),CONFIG["am_subcommand"],"--user",CONFIG["am_user"],"-a",CONFIG["intent_action"],"-d",urlunsplit((CONFIG["url_scheme"],"",quote(tempFile.name,encoding="utf-8"),"","")),"-t",CONFIG["intent_mime_type"],"--grant-read-uri-permission","--grant-write-uri-permission","--grant-prefix-uri-permission","--include-stopped-packages","--activity-exclude-from-recents","--activity-no-animation",CONFIG["intent_component"]),check=True)
             with serverSocket.accept()[0] as clientSocket:
-                clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+                clientSocket.sendall((dumps({"file":absolutePath,"path":dirname(absolutePath)},ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n").encode("utf-8"))
 def runString(commandString:str,commandTitle:Optional[str]=None)->None:
     with socket(AF_INET,SOCK_STREAM) as serverSocket:
         serverPort=bindAvailablePort(serverSocket,1)
@@ -72,4 +72,4 @@ def runString(commandString:str,commandTitle:Optional[str]=None)->None:
                     usedTitle="%s-%d"%(CONFIG["command_title"],time_ns())
                 else:
                     usedTitle=str(commandTitle)
-                clientSocket.sendall((dumps({"name":usedTitle,"script":str(commandString)},ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+                clientSocket.sendall((dumps({"name":usedTitle,"script":str(commandString)},ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n").encode("utf-8"))

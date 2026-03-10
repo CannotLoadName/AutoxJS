@@ -9,6 +9,7 @@ from time import time_ns
 from typing import Any,Callable,Dict,List,Optional,Tuple,Union
 from warnings import warn
 from .runner import CONFIG,bindAvailablePort,runString
+from .remotecaller import Context
 MODULE_PATH=dirname(__spec__.origin)
 LOCATOR_SCRIPT=open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8").read()
 RECORDER_SCRIPT=open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8").read()
@@ -16,7 +17,7 @@ SENSOR_SCRIPT=open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8").read()
 def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[Dict[str,Any],int]],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
     tempCallback=[]
     with tempSocket as clientSocket:
-        clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+        clientSocket.sendall((dumps(arguments,ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n").encode("utf-8"))
         with clientSocket.makefile("r",encoding="utf-8") as socketReader:
             while True:
                 try:
@@ -55,7 +56,7 @@ def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,re
 def recorderMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[bytes,int]],callback:List[Callable[[ArrayType],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,receiveSize:int,itemSize:int,typeCode:str,arguments:Dict[str,Union[float,int,str]])->None:
     tempCallback=[]
     with tempSocket as clientSocket:
-        clientSocket.sendall((dumps(arguments,ensure_ascii=False,separators=(",",":"))+"\n").encode("utf-8"))
+        clientSocket.sendall((dumps(arguments,ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n").encode("utf-8"))
         lastLength=0
         with memoryview(bytearray(receiveSize+itemSize-1)) as inputBuffer:
             while True:
@@ -147,10 +148,25 @@ class LocatorRecorderOrSensor:
             except OSError:
                 pass
             self._clientSocket=None
-class Location(LocatorRecorderOrSensor):
+class LocatorOrSensor(LocatorRecorderOrSensor):
+    def read(self)->Tuple[int,Dict[str,Any]]:
+        with self._readLock:
+            if "serial_number" in self._result:
+                serialNumber=self._result["serial_number"]
+            else:
+                serialNumber=-1
+            if "data" in self._result:
+                result=deepcopy(self._result["data"])
+            else:
+                result={}
+        return serialNumber,result
+class Location(LocatorOrSensor):
     @staticmethod
-    def requestPermission()->None:
-        runString("runtime.requestPermissions([\"access_fine_location\"]);","%s-%d"%(CONFIG["location_permission_title"],time_ns()))
+    def requestPermission(remoteContext:Optional[Context]=None)->None:
+        if remoteContext is None:
+            runString("runtime.requestPermissions([\"access_fine_location\"]);","%s-%d"%(CONFIG["location_permission_title"],time_ns()))
+        else:
+            remoteContext.call("runtime.requestPermissions([\"access_fine_location\"]);")
     def start(self,locationProvider:str=CONFIG["default_location_provider"],updateDelay:int=CONFIG["default_locating_delay"])->None:
         usedProvider=str(locationProvider)
         for i in usedProvider:
@@ -168,21 +184,13 @@ class Location(LocatorRecorderOrSensor):
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"distance":CONFIG["min_locating_distance"],"provider":usedProvider})).start()
             self._clientSocket=clientSocket
-    def read(self)->Tuple[int,Dict[str,Any]]:
-        with self._readLock:
-            if "serial_number" in self._result:
-                serialNumber=self._result["serial_number"]
-            else:
-                serialNumber=-1
-            if "data" in self._result:
-                result=deepcopy(self._result["data"])
-            else:
-                result={}
-        return serialNumber,result
 class Recorder(LocatorRecorderOrSensor):
     @staticmethod
-    def requestPermission()->None:
-        runString("runtime.requestPermissions([\"record_audio\"]);","%s-%d"%(CONFIG["record_permission_title"],time_ns()))
+    def requestPermission(remoteContext:Optional[Context]=None)->None:
+        if remoteContext is None:
+            runString("runtime.requestPermissions([\"record_audio\"]);","%s-%d"%(CONFIG["record_permission_title"],time_ns()))
+        else:
+            remoteContext.call("runtime.requestPermissions([\"record_audio\"]);")
     def start(self,audioSource:str=CONFIG["default_record_source"])->None:
         usedSource=str(audioSource)
         for i in usedSource:
@@ -208,7 +216,7 @@ class Recorder(LocatorRecorderOrSensor):
             else:
                 result=array(CONFIG["audio_array_type"])
         return serialNumber,result
-class Sensor(LocatorRecorderOrSensor):
+class Sensor(LocatorOrSensor):
     def start(self,sensorType:str,sensorDelay:int=CONFIG["default_sensor_delay"])->None:
         usedType=str(sensorType)
         for i in usedType:
@@ -226,14 +234,3 @@ class Sensor(LocatorRecorderOrSensor):
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"latency":CONFIG["max_sensor_latency"],"type":usedType})).start()
             self._clientSocket=clientSocket
-    def read(self)->Tuple[int,Dict[str,Any]]:
-        with self._readLock:
-            if "serial_number" in self._result:
-                serialNumber=self._result["serial_number"]
-            else:
-                serialNumber=-1
-            if "data" in self._result:
-                result=deepcopy(self._result["data"])
-            else:
-                result={}
-        return serialNumber,result

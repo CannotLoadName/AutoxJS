@@ -9,7 +9,7 @@ if __name__=="__main__":
         pass
     configFilePath=join(dirname(__spec__.origin),"config.json")
     parser=ArgumentParser(prog="python3 -m %s"%(__spec__.parent,),description="Launch Auto.js and AutoX.js scripts through Python in Termux.",epilog="You can view the config file at the following path to learn about the config items:\n%s"%(abspath(configFilePath),))
-    parser.add_argument("-v","--version",action="version",version="AutoxJS 1.0.15")
+    parser.add_argument("-v","--version",action="version",version="AutoxJS 1.0.16")
     parser.add_argument("-a","--auto",action="append",nargs="+",type=AutoFilePath,help="run Auto.js and AutoX.js auto files",metavar="<file>",dest="script")
     parser.add_argument("-c","--config",action="append",nargs=2,help="modify config values, without changing their data types",metavar=("<key>","<value>"))
     parser.add_argument("-f","--file",action="append",nargs="+",type=FilePath,help="run Auto.js and AutoX.js script files",metavar="<file>",dest="script")
