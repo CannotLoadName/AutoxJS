@@ -1,4 +1,4 @@
-var clientSocket=new java.net.Socket("%s",%d);
+var clientSocket=new java.net.Socket(%r,%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var namespace={};
 var outputWriter=new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.OutputStreamWriter(clientSocket.getOutputStream(),"utf-8")),true);
@@ -50,21 +50,26 @@ while(true){
         else if("value" in inputObject){
             namespace[inputObject.key]=inputObject.value;
         }
-        else if("key" in inputObject){
-            outputObject={result:namespace[inputObject.key]};
-            try{
-                outputLine=JSON.stringify(outputObject);
-            }
-            catch(error){
-                outputLine=JSON.stringify({error:String(error)});
-            }
-            finally{
+        else if("query" in inputObject){
+            if(inputObject.query){
+                outputObject={result:namespace[inputObject.key]};
                 try{
-                    outputWriter.println(outputLine);
+                    outputLine=JSON.stringify(outputObject);
                 }
                 catch(error){
-                    break;
+                    outputLine=JSON.stringify({error:String(error)});
                 }
+                finally{
+                    try{
+                        outputWriter.println(outputLine);
+                    }
+                    catch(error){
+                        break;
+                    }
+                }
+            }
+            else{
+                delete namespace[inputObject.key];
             }
         }
         else{

@@ -1,4 +1,4 @@
-var clientSocket=new java.net.Socket("%s",%d);
+var clientSocket=new java.net.Socket(%r,%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var sensorManager=context.getSystemService(context.SENSOR_SERVICE);
@@ -19,12 +19,11 @@ var sensorListener=new android.hardware.SensorEventListener({
         }
     }
 });
-stopEmitter.on("stop",function(){
+stopEmitter.once("stop",function(){
     sensorManager.unregisterListener(sensorListener);
     outputWriter.close();
     inputReader.close();
     clientSocket.close();
-    stopEmitter.removeAllListeners("stop");
 });
 sensorManager.registerListener(sensorListener,sensorManager.getDefaultSensor(new Function("return android.hardware.Sensor.TYPE_"+inputObject.getString("type")+";")()),inputObject.getInt("delay"),inputObject.getInt("latency"),new android.os.Handler(android.os.Looper.myLooper()));
 threads.start(function(){

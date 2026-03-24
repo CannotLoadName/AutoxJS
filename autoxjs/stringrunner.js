@@ -1,6 +1,6 @@
-var clientSocket=new java.net.Socket("%s",%d);
+var clientSocket=new java.net.Socket(%r,%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 inputReader.close();
 clientSocket.close();
-engines.execScriptFile(inputObject.getString("file"),{path:inputObject.getString("path")});
+engines.execScript(inputObject.getString("name"),inputObject.getString("script"));

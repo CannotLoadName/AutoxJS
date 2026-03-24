@@ -3,17 +3,18 @@ from array import ArrayType,array
 from copy import deepcopy
 from json import dumps,loads
 from os.path import dirname,join
-from socket import AF_INET,SOCK_STREAM,SocketType,socket
+from socket import SocketType,socket
 from threading import Lock,Thread
 from time import time_ns
 from typing import Any,Callable,Dict,List,Optional,Tuple,Union
 from warnings import warn
+from .compressor import compressScript
 from .runner import CONFIG,bindAvailablePort,runString
 from .remotecaller import Context
 MODULE_PATH=dirname(__spec__.origin)
-LOCATOR_SCRIPT=open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8").read()
-RECORDER_SCRIPT=open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8").read()
-SENSOR_SCRIPT=open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8").read()
+LOCATOR_SCRIPT=compressScript(open(join(MODULE_PATH,"locator.js"),"r",encoding="utf-8"))
+RECORDER_SCRIPT=compressScript(open(join(MODULE_PATH,"recorder.js"),"r",encoding="utf-8"))
+SENSOR_SCRIPT=compressScript(open(join(MODULE_PATH,"sensor.js"),"r",encoding="utf-8"))
 def locatorAndSensorMain(readLock:Lock,callbackLock:Lock,endCallbackLock:Lock,result:Dict[str,Union[Dict[str,Any],int]],callback:List[Callable[[Dict[str,Any]],None]],endCallback:List[Callable[[],None]],tempSocket:SocketType,arguments:Dict[str,Union[float,int,str]])->None:
     tempCallback=[]
     with tempSocket as clientSocket:
@@ -162,12 +163,12 @@ class LocatorOrSensor(LocatorRecorderOrSensor):
         return serialNumber,result
 class Location(LocatorOrSensor):
     @staticmethod
-    def requestPermission(remoteContext:Optional[Context]=None)->None:
+    def requestPermission(remoteContext:Optional[Context]=None)->Optional[str]:
         if remoteContext is None:
-            runString("runtime.requestPermissions([\"access_fine_location\"]);","%s-%d"%(CONFIG["location_permission_title"],time_ns()))
+            return runString("runtime.requestPermissions([\"access_fine_location\"]);","%s-%d"%(CONFIG["location_permission_title"],time_ns()))
         else:
             remoteContext.call("runtime.requestPermissions([\"access_fine_location\"]);")
-    def start(self,locationProvider:str=CONFIG["default_location_provider"],updateDelay:int=CONFIG["default_locating_delay"])->None:
+    def start(self,locationProvider:str=CONFIG["default_location_provider"],updateDelay:int=CONFIG["default_locating_delay"])->str:
         usedProvider=str(locationProvider)
         for i in usedProvider:
             if i not in CONFIG["location_provider_characters"]:
@@ -178,20 +179,21 @@ class Location(LocatorOrSensor):
         with self._mainLock:
             if self._clientSocket is not None:
                 raise AttributeError("The locator has already been started")
-            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+            with socket() as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(LOCATOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["locator_title"],time_ns()))
+                result=runString(LOCATOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["locator_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"distance":CONFIG["min_locating_distance"],"provider":usedProvider})).start()
             self._clientSocket=clientSocket
+        return result
 class Recorder(LocatorRecorderOrSensor):
     @staticmethod
-    def requestPermission(remoteContext:Optional[Context]=None)->None:
+    def requestPermission(remoteContext:Optional[Context]=None)->Optional[str]:
         if remoteContext is None:
-            runString("runtime.requestPermissions([\"record_audio\"]);","%s-%d"%(CONFIG["record_permission_title"],time_ns()))
+            return runString("runtime.requestPermissions([\"record_audio\"]);","%s-%d"%(CONFIG["record_permission_title"],time_ns()))
         else:
             remoteContext.call("runtime.requestPermissions([\"record_audio\"]);")
-    def start(self,audioSource:str=CONFIG["default_record_source"])->None:
+    def start(self,audioSource:str=CONFIG["default_record_source"])->str:
         usedSource=str(audioSource)
         for i in usedSource:
             if i not in CONFIG["record_source_characters"]:
@@ -199,12 +201,13 @@ class Recorder(LocatorRecorderOrSensor):
         with self._mainLock:
             if self._clientSocket is not None:
                 raise AttributeError("The recorder has already been started")
-            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+            with socket() as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(RECORDER_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["recorder_title"],time_ns()))
+                result=runString(RECORDER_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["recorder_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
             Thread(target=recorderMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,CONFIG["max_receive_size"],array(CONFIG["audio_array_type"]).itemsize,CONFIG["audio_array_type"],{"bufferratio":CONFIG["record_buffer_ratio"],"channel":CONFIG["record_channel"],"format":CONFIG["record_format"],"samplerate":CONFIG["record_sample_rate"],"source":usedSource})).start()
             self._clientSocket=clientSocket
+        return result
     def read(self)->Tuple[int,ArrayType]:
         with self._readLock:
             if "serial_number" in self._result:
@@ -217,7 +220,7 @@ class Recorder(LocatorRecorderOrSensor):
                 result=array(CONFIG["audio_array_type"])
         return serialNumber,result
 class Sensor(LocatorOrSensor):
-    def start(self,sensorType:str,sensorDelay:int=CONFIG["default_sensor_delay"])->None:
+    def start(self,sensorType:str=CONFIG["default_sensor_type"],sensorDelay:int=CONFIG["default_sensor_delay"])->str:
         usedType=str(sensorType)
         for i in usedType:
             if i not in CONFIG["sensor_type_characters"]:
@@ -228,9 +231,10 @@ class Sensor(LocatorOrSensor):
         with self._mainLock:
             if self._clientSocket is not None:
                 raise AttributeError("The sensor has already been started")
-            with socket(AF_INET,SOCK_STREAM) as serverSocket:
+            with socket() as serverSocket:
                 serverPort=bindAvailablePort(serverSocket,1)
-                runString(SENSOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["sensor_title"],time_ns()))
+                result=runString(SENSOR_SCRIPT%(CONFIG["script_host_name"],serverPort),"%s-%d"%(CONFIG["sensor_title"],time_ns()))
                 clientSocket=serverSocket.accept()[0]
             Thread(target=locatorAndSensorMain,args=(self._readLock,self._callbackLock,self._endCallbackLock,self._result,self._callback,self._endCallback,clientSocket,{"delay":usedDelay,"latency":CONFIG["max_sensor_latency"],"type":usedType})).start()
             self._clientSocket=clientSocket
+        return result

@@ -1,4 +1,4 @@
-var clientSocket=new java.net.Socket("%s",%d);
+var clientSocket=new java.net.Socket(%r,%d);
 var inputReader=new java.io.BufferedReader(new java.io.InputStreamReader(clientSocket.getInputStream(),"utf-8"));
 var inputObject=new org.json.JSONObject(inputReader.readLine());
 var sampleRate=inputObject.getInt("samplerate");
@@ -24,15 +24,14 @@ var recorderListener=new android.media.AudioRecord.OnRecordPositionUpdateListene
         }
     }
 });
-audioRecorder.setRecordPositionUpdateListener(recorderListener,new android.os.Handler(android.os.Looper.myLooper()));
-stopEmitter.on("stop",function(){
+stopEmitter.once("stop",function(){
     audioRecorder.stop();
     audioRecorder.release();
     outputStream.close();
     inputReader.close();
     clientSocket.close();
-    stopEmitter.removeAllListeners("stop");
 });
+audioRecorder.setRecordPositionUpdateListener(recorderListener,new android.os.Handler(android.os.Looper.myLooper()));
 audioRecorder.startRecording();
 threads.start(function(){
     try{
